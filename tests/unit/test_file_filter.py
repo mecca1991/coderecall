@@ -1,0 +1,106 @@
+"""Tests for excluding low-signal files from analysis."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from coderecall.analysis.file_filter import FileFilter
+from coderecall.core.types import ChangedFile, FileStatus, FilterReason
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "dist/app.js",
+        "frontend/build/index.html",
+        "web/.next/server/app.js",
+        "coverage/lcov-report/index.html",
+    ],
+)
+def test_filters_generated_directories(path: str) -> None:
+    result = FileFilter().filter((ChangedFile(path=Path(path), status=FileStatus.MODIFIED),))
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].path == Path(path)
+    assert result.filtered_files[0].reason is FilterReason.GENERATED_DIRECTORY
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "node_modules/package/index.js",
+        "frontend/node_modules/package/index.js",
+        "vendor/library/module.py",
+        "src/vendor/library/module.py",
+    ],
+)
+def test_filters_vendored_dependencies(path: str) -> None:
+    result = FileFilter().filter((ChangedFile(path=Path(path), status=FileStatus.ADDED),))
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].reason is FilterReason.VENDORED_DEPENDENCY
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "uv.lock",
+        "Pipfile.lock",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        "bun.lock",
+        "bun.lockb",
+    ],
+)
+def test_filters_lockfiles(name: str) -> None:
+    result = FileFilter().filter(
+        (ChangedFile(path=Path("workspace") / name, status=FileStatus.MODIFIED),)
+    )
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].reason is FilterReason.LOCKFILE
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "static/app.min.js",
+        "static/styles.min.css",
+        "static/worker.min.mjs",
+        "static/config.min.cjs",
+    ],
+)
+def test_filters_minified_assets(path: str) -> None:
+    result = FileFilter().filter((ChangedFile(path=Path(path), status=FileStatus.MODIFIED),))
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].reason is FilterReason.MINIFIED_ASSET
+
+
+def test_preserves_meaningful_files_and_filtered_file_metadata() -> None:
+    meaningful = ChangedFile(path=Path("src/build.py"), status=FileStatus.MODIFIED)
+    similarly_named = ChangedFile(path=Path("src/vendor_tools.py"), status=FileStatus.ADDED)
+    lockfile = ChangedFile(path=Path("package-lock.json"), status=FileStatus.DELETED)
+
+    result = FileFilter().filter((meaningful, lockfile, similarly_named))
+
+    assert result.included_files == (meaningful, similarly_named)
+    assert result.filtered_files[0].path == lockfile.path
+    assert result.filtered_files[0].status is FileStatus.DELETED
+    assert result.filtered_files[0].reason is FilterReason.LOCKFILE
+
+
+def test_default_patterns_can_be_replaced_for_future_project_configuration() -> None:
+    changed_file = ChangedFile(path=Path("dist/app.js"), status=FileStatus.MODIFIED)
+
+    result = FileFilter(generated_directories=()).filter((changed_file,))
+
+    assert result.included_files == (changed_file,)
+    assert result.filtered_files == ()
