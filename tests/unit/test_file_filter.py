@@ -47,6 +47,7 @@ def test_filters_vendored_dependencies(path: str) -> None:
     "name",
     [
         "package-lock.json",
+        "npm-shrinkwrap.json",
         "yarn.lock",
         "pnpm-lock.yaml",
         "poetry.lock",
@@ -95,6 +96,42 @@ def test_preserves_meaningful_files_and_filtered_file_metadata() -> None:
     assert result.filtered_files[0].path == lockfile.path
     assert result.filtered_files[0].status is FileStatus.DELETED
     assert result.filtered_files[0].reason is FilterReason.LOCKFILE
+
+
+@pytest.mark.parametrize(
+    ("old_path", "new_path"),
+    [
+        ("src/app.js", "dist/app.js"),
+        ("vendor/app.js", "src/app.js"),
+    ],
+)
+def test_keeps_renames_that_cross_the_filter_boundary(
+    old_path: str,
+    new_path: str,
+) -> None:
+    renamed = ChangedFile(
+        path=Path(new_path),
+        old_path=Path(old_path),
+        status=FileStatus.RENAMED,
+    )
+
+    result = FileFilter().filter((renamed,))
+
+    assert result.included_files == (renamed,)
+    assert result.filtered_files == ()
+
+
+def test_filters_rename_when_both_paths_are_low_signal() -> None:
+    renamed = ChangedFile(
+        path=Path("dist/app.js"),
+        old_path=Path("build/app.js"),
+        status=FileStatus.RENAMED,
+    )
+
+    result = FileFilter().filter((renamed,))
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].reason is FilterReason.GENERATED_DIRECTORY
 
 
 def test_default_patterns_can_be_replaced_for_future_project_configuration() -> None:

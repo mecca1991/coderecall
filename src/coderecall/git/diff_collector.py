@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import Protocol
 
 from coderecall.core.errors import DiffCollectionFailed
 from coderecall.core.types import (
     ChangedFile,
     DiffCollection,
     DiffHunk,
+    FileFilterResult,
     FileStatus,
+    FilteredFile,
     RepositoryContext,
 )
 from coderecall.git.git_adapter import GitAdapter
@@ -20,9 +24,16 @@ from coderecall.git.git_adapter import GitAdapter
 DEFAULT_MAX_PATCH_BYTES = 1_000_000
 DEFAULT_MAX_TOTAL_PATCH_BYTES = 16 * 1024 * 1024
 DEFAULT_MAX_CHANGED_FILES = 1_000
+DEFAULT_MAX_RAW_METADATA_BYTES = 16 * 1024 * 1024
+DEFAULT_MAX_RAW_CHANGED_FILES = 10_000
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:.*)$")
 _BINARY_MARKER = re.compile(r"(?m)^(?:GIT binary patch|Binary files .+ differ)\r?$")
+
+
+class _ChangedFileFilter(Protocol):
+    def filter(self, changed_files: Iterable[ChangedFile]) -> FileFilterResult:
+        """Separate meaningful files from filtered records."""
 
 
 class DiffCollector:
@@ -35,6 +46,9 @@ class DiffCollector:
         max_patch_bytes: int = DEFAULT_MAX_PATCH_BYTES,
         max_total_patch_bytes: int = DEFAULT_MAX_TOTAL_PATCH_BYTES,
         max_changed_files: int = DEFAULT_MAX_CHANGED_FILES,
+        max_raw_metadata_bytes: int = DEFAULT_MAX_RAW_METADATA_BYTES,
+        max_raw_changed_files: int = DEFAULT_MAX_RAW_CHANGED_FILES,
+        file_filter: _ChangedFileFilter | None = None,
     ) -> None:
         if max_patch_bytes < 1:
             raise ValueError("max_patch_bytes must be positive")
@@ -42,10 +56,17 @@ class DiffCollector:
             raise ValueError("max_total_patch_bytes must be positive")
         if max_changed_files < 1:
             raise ValueError("max_changed_files must be positive")
+        if max_raw_metadata_bytes < 1:
+            raise ValueError("max_raw_metadata_bytes must be positive")
+        if max_raw_changed_files < 1:
+            raise ValueError("max_raw_changed_files must be positive")
         self.git = git
         self.max_patch_bytes = max_patch_bytes
         self.max_total_patch_bytes = max_total_patch_bytes
         self.max_changed_files = max_changed_files
+        self.max_raw_metadata_bytes = max_raw_metadata_bytes
+        self.max_raw_changed_files = max_raw_changed_files
+        self.file_filter = file_filter
 
     def collect(
         self,
@@ -57,15 +78,39 @@ class DiffCollector:
         """Collect one structured comparison against the selected base branch."""
 
         merge_base = self.git.find_merge_base(repository, base_branch)
+        filter_result: FileFilterResult | None = None
+
+        def select_records(metadata: bytes) -> tuple[bool, ...]:
+            nonlocal filter_result
+            raw_changed_files = self._parse_raw_metadata(
+                metadata,
+                max_changed_files=self.max_raw_changed_files,
+            )
+            if self.file_filter is None:
+                return (True,) * len(raw_changed_files)
+            filter_result = self.file_filter.filter(raw_changed_files)
+            included_files = frozenset(filter_result.included_files)
+            return tuple(changed_file in included_files for changed_file in raw_changed_files)
+
         raw_diff = self.git.collect_diff(
             repository,
             merge_base,
             max_patch_bytes=self.max_patch_bytes,
             max_total_patch_bytes=self.max_total_patch_bytes,
             max_changed_files=self.max_changed_files,
+            max_raw_metadata_bytes=self.max_raw_metadata_bytes,
+            record_selector=select_records if self.file_filter is not None else None,
             include_uncommitted=include_uncommitted,
         )
-        changed_files = self._parse_raw_metadata(raw_diff.metadata)
+        if filter_result is None:
+            changed_files = self._parse_raw_metadata(
+                raw_diff.metadata,
+                max_changed_files=self.max_raw_changed_files,
+            )
+            filtered_files: tuple[FilteredFile, ...] = ()
+        else:
+            changed_files = filter_result.included_files
+            filtered_files = filter_result.filtered_files
         patch_records = raw_diff.patch_records
         if len(patch_records) != len(changed_files):
             raise DiffCollectionFailed(
@@ -117,13 +162,18 @@ class DiffCollector:
         return DiffCollection(
             merge_base=merge_base,
             changed_files=tuple(collected_files),
+            filtered_files=filtered_files,
             diff_hunks=tuple(all_hunks),
             uncertainty_notes=tuple(uncertainty_notes),
             includes_uncommitted=include_uncommitted,
         )
 
     @staticmethod
-    def _parse_raw_metadata(metadata: bytes) -> tuple[ChangedFile, ...]:
+    def _parse_raw_metadata(
+        metadata: bytes,
+        *,
+        max_changed_files: int | None = None,
+    ) -> tuple[ChangedFile, ...]:
         if not metadata:
             return ()
 
@@ -169,6 +219,7 @@ class DiffCollector:
                         status=FileStatus.RENAMED,
                     )
                 )
+                DiffCollector._enforce_raw_file_limit(changed_files, max_changed_files)
                 continue
 
             if index >= len(fields):
@@ -191,8 +242,21 @@ class DiffCollector:
                     debug_details=f"Status `{status_token}` for `{path}` is not supported.",
                 )
             changed_files.append(ChangedFile(path=path, status=status))
+            DiffCollector._enforce_raw_file_limit(changed_files, max_changed_files)
 
         return tuple(changed_files)
+
+    @staticmethod
+    def _enforce_raw_file_limit(
+        changed_files: list[ChangedFile],
+        max_changed_files: int | None,
+    ) -> None:
+        if max_changed_files is None or len(changed_files) <= max_changed_files:
+            return
+        raise DiffCollectionFailed(
+            f"Git diff contains more than {max_changed_files:,} raw changed files.",
+            recovery="Review a smaller change or raise the configured raw changed-file limit.",
+        )
 
     @staticmethod
     def _parse_hunks(file_path: Path, patch: str) -> tuple[DiffHunk, ...]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Literal, cast
@@ -20,7 +21,7 @@ from coderecall.core.types import RepositoryContext
 
 _PATCH_READ_SIZE = 64 * 1024
 _PATCH_RECORD_HEADER = b"diff --git "
-_RAW_METADATA_BYTES_PER_FILE = 16 * 1024
+_DEFAULT_MAX_RAW_METADATA_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class RawDiffOutput:
 
     metadata: bytes
     patch_records: tuple[RawPatchRecord, ...]
+    record_selection: tuple[bool, ...] | None = None
 
 
 class _PrefixedReader:
@@ -180,6 +182,8 @@ class GitAdapter:
         max_patch_bytes: int,
         max_total_patch_bytes: int,
         max_changed_files: int,
+        max_raw_metadata_bytes: int = _DEFAULT_MAX_RAW_METADATA_BYTES,
+        record_selector: Callable[[bytes], tuple[bool, ...]] | None = None,
         include_uncommitted: bool = False,
     ) -> RawDiffOutput:
         """Stream atomic file metadata and bounded patches in diff order."""
@@ -224,6 +228,8 @@ class GitAdapter:
                         max_patch_bytes=max_patch_bytes,
                         max_total_patch_bytes=max_total_patch_bytes,
                         max_changed_files=max_changed_files,
+                        max_raw_metadata_bytes=max_raw_metadata_bytes,
+                        record_selector=record_selector,
                     )
                 except BaseException:
                     process.kill()
@@ -350,6 +356,8 @@ class GitAdapter:
         max_patch_bytes: int,
         max_total_patch_bytes: int,
         max_changed_files: int,
+        max_raw_metadata_bytes: int,
+        record_selector: Callable[[bytes], tuple[bool, ...]] | None,
     ) -> RawDiffOutput:
         metadata = bytearray()
         trailing_null = b""
@@ -362,13 +370,20 @@ class GitAdapter:
                         "Git returned incomplete raw diff metadata.",
                         recovery="Run the command again after checking the repository state.",
                     )
-                return RawDiffOutput(metadata=b"", patch_records=())
+                selection = record_selector(b"") if record_selector is not None else None
+                return RawDiffOutput(
+                    metadata=b"",
+                    patch_records=(),
+                    record_selection=selection,
+                )
 
             combined = trailing_null + chunk
             separator = combined.find(b"\0\0")
             if separator >= 0:
                 metadata.extend(combined[:separator])
                 patch_prefix = combined[separator + 2 :]
+                if len(metadata) > max_raw_metadata_bytes:
+                    GitAdapter._raise_raw_metadata_limit(max_raw_metadata_bytes)
                 break
 
             if combined.endswith(b"\0"):
@@ -378,12 +393,16 @@ class GitAdapter:
                 metadata.extend(combined)
                 trailing_null = b""
 
-            max_metadata_bytes = max_changed_files * _RAW_METADATA_BYTES_PER_FILE
-            if len(metadata) > max_metadata_bytes:
-                raise DiffCollectionFailed(
-                    "Git diff metadata exceeds CodeRecall's safety limit.",
-                    recovery="Review a smaller change or raise the configured file limit.",
-                )
+            if len(metadata) > max_raw_metadata_bytes:
+                GitAdapter._raise_raw_metadata_limit(max_raw_metadata_bytes)
+
+        metadata_bytes = bytes(metadata)
+        selection = record_selector(metadata_bytes) if record_selector is not None else None
+        if selection is not None and sum(selection) > max_changed_files:
+            raise DiffCollectionFailed(
+                f"Git diff contains more than {max_changed_files:,} files for analysis.",
+                recovery="Review a smaller change or raise the configured analysis file limit.",
+            )
 
         patch_reader = _PrefixedReader(patch_prefix, stdout)
         patch_records = GitAdapter._read_patch_records(
@@ -391,8 +410,23 @@ class GitAdapter:
             max_patch_bytes=max_patch_bytes,
             max_total_patch_bytes=max_total_patch_bytes,
             max_changed_files=max_changed_files,
+            record_selection=selection,
         )
-        return RawDiffOutput(metadata=bytes(metadata), patch_records=patch_records)
+        return RawDiffOutput(
+            metadata=metadata_bytes,
+            patch_records=patch_records,
+            record_selection=selection,
+        )
+
+    @staticmethod
+    def _raise_raw_metadata_limit(max_raw_metadata_bytes: int) -> None:
+        raise DiffCollectionFailed(
+            "Git diff metadata exceeds CodeRecall's raw metadata safety limit.",
+            recovery=(
+                "Review a smaller change or raise the configured raw metadata limit "
+                f"above {max_raw_metadata_bytes:,} bytes."
+            ),
+        )
 
     @staticmethod
     def _read_patch_records(
@@ -401,6 +435,7 @@ class GitAdapter:
         max_patch_bytes: int,
         max_total_patch_bytes: int,
         max_changed_files: int,
+        record_selection: tuple[bool, ...] | None,
     ) -> tuple[RawPatchRecord, ...]:
         records: list[RawPatchRecord] = []
         current_parts: list[bytes] = []
@@ -408,6 +443,8 @@ class GitAdapter:
         current_limit_reason: Literal["file", "aggregate"] | None = None
         total_buffered_bytes = 0
         in_record = False
+        include_current_record = False
+        raw_record_count = 0
         at_line_start = True
 
         def finish_record() -> None:
@@ -423,9 +460,18 @@ class GitAdapter:
                 break
             starts_record = at_line_start and fragment.startswith(_PATCH_RECORD_HEADER)
             if starts_record:
-                if in_record:
+                if in_record and include_current_record:
                     finish_record()
-                if len(records) >= max_changed_files:
+                if record_selection is not None and raw_record_count >= len(record_selection):
+                    raise DiffCollectionFailed(
+                        "Git returned more patch records than changed-file metadata.",
+                        recovery="Run the command again after checking the repository state.",
+                    )
+                include_current_record = (
+                    record_selection is None or record_selection[raw_record_count]
+                )
+                raw_record_count += 1
+                if include_current_record and len(records) >= max_changed_files:
                     raise DiffCollectionFailed(
                         f"Git diff contains more than {max_changed_files:,} changed files.",
                         recovery="Review a smaller change or raise the configured file limit.",
@@ -435,7 +481,7 @@ class GitAdapter:
                 current_size = 0
                 current_limit_reason = None
 
-            if in_record and current_limit_reason is None:
+            if in_record and include_current_record and current_limit_reason is None:
                 current_size += len(fragment)
                 if current_size > max_patch_bytes:
                     current_parts.clear()
@@ -448,6 +494,11 @@ class GitAdapter:
 
             at_line_start = fragment.endswith(b"\n")
 
-        if in_record:
+        if in_record and include_current_record:
             finish_record()
+        if record_selection is not None and raw_record_count != len(record_selection):
+            raise DiffCollectionFailed(
+                "Git returned fewer patch records than changed-file metadata.",
+                recovery="Run the command again after checking the repository state.",
+            )
         return tuple(records)

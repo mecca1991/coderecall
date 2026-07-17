@@ -17,6 +17,7 @@ DEFAULT_VENDORED_DIRECTORIES = frozenset({"node_modules", "vendor"})
 DEFAULT_LOCKFILE_NAMES = frozenset(
     {
         "package-lock.json",
+        "npm-shrinkwrap.json",
         "yarn.lock",
         "pnpm-lock.yaml",
         "poetry.lock",
@@ -55,7 +56,7 @@ class FileFilter:
         filtered_files: list[FilteredFile] = []
 
         for changed_file in changed_files:
-            reason = self._reason_for(changed_file.path)
+            reason = self.reason_for(changed_file)
             if reason is None:
                 included_files.append(changed_file)
                 continue
@@ -72,7 +73,19 @@ class FileFilter:
             filtered_files=tuple(filtered_files),
         )
 
-    def _reason_for(self, path: Path) -> FilterReason | None:
+    def reason_for(self, changed_file: ChangedFile) -> FilterReason | None:
+        """Return a filter reason, preserving renames that cross a filter boundary."""
+
+        destination_reason = self._reason_for_path(changed_file.path)
+        if changed_file.old_path is None:
+            return destination_reason
+
+        source_reason = self._reason_for_path(changed_file.old_path)
+        if destination_reason is not None and source_reason is not None:
+            return destination_reason
+        return None
+
+    def _reason_for_path(self, path: Path) -> FilterReason | None:
         directory_parts = frozenset(path.parts[:-1])
         if directory_parts & self.generated_directories:
             return FilterReason.GENERATED_DIRECTORY

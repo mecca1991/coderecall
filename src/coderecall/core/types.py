@@ -84,6 +84,7 @@ class DiffCollection:
 
     merge_base: str
     changed_files: tuple[ChangedFile, ...] = ()
+    filtered_files: tuple[FilteredFile, ...] = ()
     diff_hunks: tuple[DiffHunk, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
     includes_uncommitted: bool = False
