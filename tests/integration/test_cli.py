@@ -74,6 +74,23 @@ def test_review_reports_repository_context(
         cwd=tmp_path,
         check=True,
     )
+    tracked.write_text("second revision\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Feature change",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["review"])
@@ -82,6 +99,8 @@ def test_review_reports_repository_context(
     assert "Current branch: feature/cli-context" in result.output
     assert "Repository root:" in result.output
     assert "Base branch: main" in result.output
+    assert "Changed files: 1" in result.output
+    assert "modified: tracked.txt" in result.output
 
 
 def test_review_fails_clearly_outside_repository(

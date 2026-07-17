@@ -9,6 +9,7 @@ from pathlib import Path
 from coderecall.core.errors import (
     BaseBranchNotFound,
     DetachedHead,
+    DiffCollectionFailed,
     GitCommandFailed,
     NotGitRepository,
 )
@@ -103,6 +104,73 @@ class GitAdapter:
             debug_details="Checked local refs: main, master.",
         )
 
+    def find_merge_base(self, repository: RepositoryContext, base_branch: str) -> str:
+        """Return the common ancestor used for the branch comparison."""
+
+        result = self._run("merge-base", base_branch, "HEAD", cwd=repository.root)
+        if result.returncode != 0:
+            self._raise_diff_failure(result, "merge-base", base_branch, "HEAD")
+
+        merge_base = result.stdout.strip()
+        if not merge_base:
+            raise DiffCollectionFailed(
+                f"Git could not find a merge base between `{base_branch}` and `HEAD`.",
+                recovery="Choose a base branch that shares history with the current branch.",
+                debug_details=self._display_command("merge-base", base_branch, "HEAD"),
+            )
+        return merge_base
+
+    def collect_name_status(
+        self,
+        repository: RepositoryContext,
+        merge_base: str,
+        *,
+        include_uncommitted: bool = False,
+    ) -> str:
+        """Return NUL-delimited changed-file metadata from Git."""
+
+        revisions = self._diff_revisions(merge_base, include_uncommitted)
+        arguments = (
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            "--no-ext-diff",
+            *revisions,
+            "--",
+        )
+        result = self._run(*arguments, cwd=repository.root)
+        if result.returncode != 0:
+            self._raise_diff_failure(result, *arguments)
+        return result.stdout
+
+    def collect_patch(
+        self,
+        repository: RepositoryContext,
+        merge_base: str,
+        paths: tuple[Path, ...],
+        *,
+        include_uncommitted: bool = False,
+    ) -> str:
+        """Return a unified patch for a single changed-file record."""
+
+        revisions = self._diff_revisions(merge_base, include_uncommitted)
+        arguments = (
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--find-renames",
+            "--unified=80",
+            *revisions,
+            "--",
+            *(str(path) for path in paths),
+        )
+        result = self._run(*arguments, cwd=repository.root)
+        if result.returncode != 0:
+            self._raise_diff_failure(result, *arguments)
+        return result.stdout
+
     def _ref_exists(self, root: Path, reference: str) -> bool:
         result = self._run(
             "rev-parse",
@@ -129,8 +197,9 @@ class GitAdapter:
                 cwd=cwd,
                 capture_output=True,
                 check=False,
+                encoding="utf-8",
                 env=environment,
-                text=True,
+                errors="surrogateescape",
             )
         except FileNotFoundError as error:
             raise GitCommandFailed(
@@ -162,3 +231,21 @@ class GitAdapter:
 
     def _display_command(self, *arguments: str) -> str:
         return " ".join((self.executable, *arguments))
+
+    @staticmethod
+    def _diff_revisions(merge_base: str, include_uncommitted: bool) -> tuple[str, ...]:
+        if include_uncommitted:
+            return (merge_base,)
+        return (merge_base, "HEAD")
+
+    def _raise_diff_failure(
+        self,
+        result: subprocess.CompletedProcess[str],
+        *arguments: str,
+    ) -> None:
+        details = result.stderr.strip() or f"Git exited with {result.returncode}."
+        raise DiffCollectionFailed(
+            "CodeRecall could not collect the Git diff.",
+            recovery="Resolve the Git error and run CodeRecall again.",
+            debug_details=f"{self._display_command(*arguments)}: {details}",
+        )
