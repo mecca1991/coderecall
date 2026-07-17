@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from coderecall.analysis import FileFilter
 from coderecall.core.errors import DiffCollectionFailed
 from coderecall.core.types import DiffCollection, FileStatus
 from coderecall.git import DiffCollector, GitAdapter
@@ -42,6 +43,8 @@ def collect_changes(
     max_patch_bytes: int = 1_000_000,
     max_total_patch_bytes: int = 16 * 1024 * 1024,
     max_changed_files: int = 1_000,
+    max_raw_changed_files: int = 10_000,
+    filter_low_signal: bool = False,
 ) -> DiffCollection:
     git = GitAdapter(directory)
     repository = git.detect_repository()
@@ -50,6 +53,8 @@ def collect_changes(
         max_patch_bytes=max_patch_bytes,
         max_total_patch_bytes=max_total_patch_bytes,
         max_changed_files=max_changed_files,
+        max_raw_changed_files=max_raw_changed_files,
+        file_filter=FileFilter() if filter_low_signal else None,
     ).collect(
         repository,
         "main",
@@ -203,6 +208,79 @@ def test_aggregate_patch_and_file_count_limits_are_enforced(tmp_path: Path) -> N
         collect_changes(tmp_path, max_changed_files=2)
 
     assert "more than 2 changed files" in captured.value.message
+
+
+def test_filters_generated_files_before_analysis_limits(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("VALUE = 1\n")
+    commit_all(tmp_path, "Add application source")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/generated-output")
+
+    (tmp_path / "src" / "app.py").write_text("VALUE = 2\n")
+    (tmp_path / "dist").mkdir()
+    for index in range(3):
+        (tmp_path / "dist" / f"bundle-{index}.js").write_text("x" * 500 + "\n")
+    commit_all(tmp_path, "Build application")
+
+    collection = collect_changes(
+        tmp_path,
+        max_changed_files=1,
+        max_total_patch_bytes=300,
+        filter_low_signal=True,
+    )
+
+    assert [changed.path for changed in collection.changed_files] == [Path("src/app.py")]
+    assert collection.changed_files[0].hunks
+    assert {filtered.path for filtered in collection.filtered_files} == {
+        Path("dist/bundle-0.js"),
+        Path("dist/bundle-1.js"),
+        Path("dist/bundle-2.js"),
+    }
+    assert not collection.uncertainty_notes
+
+
+def test_keeps_cross_boundary_rename_in_analysis(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.js").write_text("export const enabled = true;\n")
+    commit_all(tmp_path, "Add source file")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/move-generated-file")
+
+    (tmp_path / "dist").mkdir()
+    run_git(tmp_path, "mv", "src/app.js", "dist/app.js")
+    commit_all(tmp_path, "Move source into generated output")
+
+    collection = collect_changes(tmp_path, filter_low_signal=True)
+
+    assert len(collection.changed_files) == 1
+    renamed = collection.changed_files[0]
+    assert renamed.status is FileStatus.RENAMED
+    assert renamed.old_path == Path("src/app.js")
+    assert renamed.path == Path("dist/app.js")
+    assert collection.filtered_files == ()
+
+
+def test_raw_changed_file_limit_still_applies_before_filtering(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "base.txt").write_text("base\n")
+    commit_all(tmp_path, "Add base file")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/generated-output")
+
+    (tmp_path / "dist").mkdir()
+    for index in range(3):
+        (tmp_path / "dist" / f"bundle-{index}.js").write_text("generated\n")
+    commit_all(tmp_path, "Build application")
+
+    with pytest.raises(DiffCollectionFailed) as captured:
+        collect_changes(
+            tmp_path,
+            max_changed_files=1,
+            max_raw_changed_files=2,
+            filter_low_signal=True,
+        )
+
+    assert "more than 2 raw changed files" in captured.value.message
 
 
 def test_submodule_patch_format_ignores_repository_configuration(tmp_path: Path) -> None:

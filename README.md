@@ -16,7 +16,7 @@ The main workflow is:
 coderecall review --base main
 ```
 
-Git repository detection, base selection, and change collection are available. Question generation and reporting are still under development.
+Git repository detection, base selection, change collection, and low-signal file filtering are available. Question generation and reporting are still under development.
 
 By default, `review` compares commits on the current branch with their merge base on the selected branch. To also include staged and unstaged changes to tracked files, run:
 
@@ -31,6 +31,8 @@ Untracked files are excluded until they are added to Git. The command will event
 3. Ask open-ended questions about behavior, failure modes, and evidence.
 4. Evaluate answers against repository evidence.
 5. Write a local Markdown report.
+
+The review context excludes generated output, vendored dependencies, lockfiles, and minified assets from analysis by default. Filtered paths remain visible in the command output with the reason they were excluded.
 
 Optional pre-push hook support is planned:
 

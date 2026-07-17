@@ -17,6 +17,15 @@ class FileStatus(StrEnum):
     RENAMED = "renamed"
 
 
+class FilterReason(StrEnum):
+    """Why a changed file was excluded from the reasoning context."""
+
+    GENERATED_DIRECTORY = "generated directory"
+    VENDORED_DEPENDENCY = "vendored dependency"
+    LOCKFILE = "lockfile"
+    MINIFIED_ASSET = "minified asset"
+
+
 class QuestionCategory(StrEnum):
     """Default learning-question categories."""
 
@@ -75,6 +84,7 @@ class DiffCollection:
 
     merge_base: str
     changed_files: tuple[ChangedFile, ...] = ()
+    filtered_files: tuple[FilteredFile, ...] = ()
     diff_hunks: tuple[DiffHunk, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
     includes_uncommitted: bool = False
@@ -85,8 +95,16 @@ class FilteredFile:
     """A file excluded from the main reasoning context."""
 
     path: Path
-    reason: str
+    reason: FilterReason
     status: FileStatus | None = None
+
+
+@dataclass(frozen=True)
+class FileFilterResult:
+    """Meaningful and filtered files produced by one filtering pass."""
+
+    included_files: tuple[ChangedFile, ...] = ()
+    filtered_files: tuple[FilteredFile, ...] = ()
 
 
 @dataclass(frozen=True)

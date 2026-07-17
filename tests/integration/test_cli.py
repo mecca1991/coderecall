@@ -9,8 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from coderecall.cli.app import app
-from coderecall.cli.commands.review import _format_changed_file
-from coderecall.core.types import ChangedFile, FileStatus
+from coderecall.cli.commands.review import _format_changed_file, _format_filtered_file
+from coderecall.core.types import ChangedFile, FileStatus, FilteredFile, FilterReason
 
 runner = CliRunner()
 
@@ -103,6 +103,69 @@ def test_review_reports_repository_context(
     assert "Base branch: main" in result.output
     assert "Changed files: 1" in result.output
     assert 'modified: "tracked.txt"' in result.output
+
+
+def test_review_reports_filtered_files_and_reasons(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "main"],
+        cwd=tmp_path,
+        check=True,
+    )
+    (tmp_path / "app.py").write_text("ENABLED = False\n")
+    (tmp_path / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
+    subprocess.run(["git", "add", "--all"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Initial commit",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "feature/filter-context"],
+        cwd=tmp_path,
+        check=True,
+    )
+    (tmp_path / "app.py").write_text("ENABLED = True\n")
+    (tmp_path / "package-lock.json").write_text('{"lockfileVersion": 3, "changed": true}\n')
+    subprocess.run(["git", "add", "--all"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Change application and lockfile",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["review"])
+
+    assert result.exit_code == 0
+    assert "Changed files: 2" in result.output
+    assert "Files for analysis: 1" in result.output
+    assert 'modified: "app.py"' in result.output
+    assert "Filtered files: 1" in result.output
+    assert 'modified: "package-lock.json" (filtered: lockfile)' in result.output
 
 
 def test_review_fails_clearly_outside_repository(
@@ -199,6 +262,21 @@ def test_changed_file_paths_are_escaped_for_terminal_output() -> None:
     )
 
     rendered = _format_changed_file(changed_file)
+
+    assert "\n" not in rendered
+    assert "\x1b" not in rendered
+    assert "\\n" in rendered
+    assert "\\u001b" in rendered
+
+
+def test_filtered_file_paths_are_escaped_for_terminal_output() -> None:
+    filtered_file = FilteredFile(
+        path=Path("line\nbreak-\x1b[31m.js"),
+        status=FileStatus.MODIFIED,
+        reason=FilterReason.MINIFIED_ASSET,
+    )
+
+    rendered = _format_filtered_file(filtered_file)
 
     assert "\n" not in rendered
     assert "\x1b" not in rendered
