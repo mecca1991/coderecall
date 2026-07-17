@@ -106,6 +106,50 @@ def test_uncommitted_collection_includes_only_tracked_files(tmp_path: Path) -> N
     assert with_working_tree.includes_uncommitted is True
 
 
+def test_file_to_directory_replacement_keeps_hunks_attributed(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "module").write_text("old standalone module\n")
+    commit_all(tmp_path, "Add standalone module")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/module-package")
+
+    (tmp_path / "module").unlink()
+    (tmp_path / "module").mkdir()
+    (tmp_path / "module" / "child.py").write_text("NEW_VALUE = 42\n")
+    commit_all(tmp_path, "Replace module with package")
+
+    collection = collect_changes(tmp_path)
+    by_path = {changed.path: changed for changed in collection.changed_files}
+
+    deleted = by_path[Path("module")]
+    added = by_path[Path("module/child.py")]
+    assert deleted.status is FileStatus.DELETED
+    assert added.status is FileStatus.ADDED
+    assert len(deleted.hunks) == 1
+    assert len(added.hunks) == 1
+    assert "old standalone module" in deleted.hunks[0].patch
+    assert "NEW_VALUE" not in deleted.hunks[0].patch
+    assert "NEW_VALUE" in added.hunks[0].patch
+    assert all(hunk.file_path == Path("module") for hunk in deleted.hunks)
+    assert all(hunk.file_path == Path("module/child.py") for hunk in added.hunks)
+
+
+def test_binary_marker_in_text_content_does_not_discard_hunks(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "format-notes.txt").write_text("Git patch notes\n")
+    commit_all(tmp_path, "Add format notes")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/document-binary-marker")
+
+    (tmp_path / "format-notes.txt").write_text("Git patch notes\nGIT binary patch\n")
+    commit_all(tmp_path, "Document binary marker")
+
+    collection = collect_changes(tmp_path)
+    changed_file = collection.changed_files[0]
+
+    assert changed_file.is_binary is False
+    assert changed_file.hunks
+    assert "GIT binary patch" in changed_file.hunks[0].patch
+
+
 def test_binary_and_large_patches_are_reported_without_hunks(tmp_path: Path) -> None:
     initialize_repository(tmp_path)
     (tmp_path / "asset.bin").write_bytes(b"\x00base\x01")
@@ -114,17 +158,27 @@ def test_binary_and_large_patches_are_reported_without_hunks(tmp_path: Path) -> 
     run_git(tmp_path, "checkout", "--quiet", "-b", "feature/large-files")
 
     (tmp_path / "asset.bin").write_bytes(b"\x00changed\x02")
-    (tmp_path / "large.txt").write_text("changed line\n" * 100)
+    (tmp_path / "large.txt").write_text("x" * 200_000)
     commit_all(tmp_path, "Change binary and large files")
 
-    collection = collect_changes(tmp_path, max_patch_bytes=200)
+    git = GitAdapter(tmp_path)
+    repository = git.detect_repository()
+    merge_base = git.find_merge_base(repository, "main")
+    patch_records = git.collect_patch_records(
+        repository,
+        merge_base,
+        max_patch_bytes=200,
+    )
+    collection = DiffCollector(git, max_patch_bytes=200).collect(repository, "main")
     by_path = {changed.path: changed for changed in collection.changed_files}
 
+    assert patch_records[-1].oversized is True
+    assert patch_records[-1].content is None
     assert by_path[Path("asset.bin")].is_binary is True
     assert by_path[Path("asset.bin")].hunks == ()
     assert by_path[Path("large.txt")].hunks == ()
-    assert any("binary file `asset.bin`" in note for note in collection.uncertainty_notes)
+    assert any('binary file "asset.bin"' in note for note in collection.uncertainty_notes)
     assert any(
-        "`large.txt`" in note and "exceeds 200 bytes" in note
+        '"large.txt"' in note and "exceeds 200 bytes" in note
         for note in collection.uncertainty_notes
     )

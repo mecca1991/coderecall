@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -19,6 +20,7 @@ from coderecall.git.git_adapter import GitAdapter
 DEFAULT_MAX_PATCH_BYTES = 1_000_000
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?:.*)$")
+_BINARY_MARKER = re.compile(r"(?m)^(?:GIT binary patch|Binary files .+ differ)\r?$")
 
 
 class DiffCollector:
@@ -51,34 +53,47 @@ class DiffCollector:
             include_uncommitted=include_uncommitted,
         )
         changed_files = self._parse_name_status(status_output)
+        patch_records = self.git.collect_patch_records(
+            repository,
+            merge_base,
+            max_patch_bytes=self.max_patch_bytes,
+            include_uncommitted=include_uncommitted,
+        )
+        if len(patch_records) != len(changed_files):
+            raise DiffCollectionFailed(
+                "Git returned inconsistent changed-file and patch metadata.",
+                recovery="Run the command again after checking the repository state.",
+                debug_details=(
+                    f"Received {len(changed_files)} file records and "
+                    f"{len(patch_records)} patch records."
+                ),
+            )
+
         collected_files: list[ChangedFile] = []
         all_hunks: list[DiffHunk] = []
         uncertainty_notes: list[str] = []
 
-        for changed_file in changed_files:
-            paths = self._patch_paths(changed_file)
-            patch = self.git.collect_patch(
-                repository,
-                merge_base,
-                paths,
-                include_uncommitted=include_uncommitted,
-            )
-            is_binary = self._is_binary_patch(patch)
+        for changed_file, patch_record in zip(changed_files, patch_records, strict=True):
+            is_binary = False
             hunks: tuple[DiffHunk, ...] = ()
 
-            if is_binary:
-                uncertainty_notes.append(
-                    f"Skipped patch hunks for binary file `{changed_file.path}`."
-                )
-            elif self._patch_size(patch) > self.max_patch_bytes:
+            if patch_record.oversized:
                 uncertainty_notes.append(
                     "Skipped patch hunks for "
-                    f"`{changed_file.path}` because its patch exceeds "
+                    f"{self._format_path(changed_file.path)} because its patch exceeds "
                     f"{self.max_patch_bytes:,} bytes."
                 )
             else:
-                hunks = self._parse_hunks(changed_file.path, patch)
-                all_hunks.extend(hunks)
+                patch = (patch_record.content or b"").decode("utf-8", errors="surrogateescape")
+                is_binary = self._is_binary_patch(patch)
+                if is_binary:
+                    uncertainty_notes.append(
+                        "Skipped patch hunks for binary file "
+                        f"{self._format_path(changed_file.path)}."
+                    )
+                else:
+                    hunks = self._parse_hunks(changed_file.path, patch)
+                    all_hunks.extend(hunks)
 
             collected_files.append(replace(changed_file, is_binary=is_binary, hunks=hunks))
 
@@ -187,17 +202,9 @@ class DiffCollector:
         return tuple(hunks)
 
     @staticmethod
-    def _patch_paths(changed_file: ChangedFile) -> tuple[Path, ...]:
-        if changed_file.old_path is None:
-            return (changed_file.path,)
-        return (changed_file.old_path, changed_file.path)
-
-    @staticmethod
     def _is_binary_patch(patch: str) -> bool:
-        return "GIT binary patch" in patch or any(
-            line.startswith("Binary files ") for line in patch.splitlines()
-        )
+        return _BINARY_MARKER.search(patch) is not None
 
     @staticmethod
-    def _patch_size(patch: str) -> int:
-        return len(patch.encode("utf-8", errors="surrogateescape"))
+    def _format_path(path: Path) -> str:
+        return json.dumps(str(path), ensure_ascii=True)

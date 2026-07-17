@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
@@ -22,11 +23,15 @@ def _exit_with_error(error: CodeRecallError) -> None:
 
 def _format_changed_file(changed_file: ChangedFile) -> str:
     if changed_file.status is FileStatus.RENAMED and changed_file.old_path is not None:
-        path = f"{changed_file.old_path} -> {changed_file.path}"
+        path = f"{_format_path(changed_file.old_path)} -> {_format_path(changed_file.path)}"
     else:
-        path = str(changed_file.path)
+        path = _format_path(changed_file.path)
     binary_suffix = " (binary)" if changed_file.is_binary else ""
     return f"  {changed_file.status.value}: {path}{binary_suffix}"
+
+
+def _format_path(path: Path) -> str:
+    return json.dumps(str(path), ensure_ascii=True)
 
 
 def review_command(
@@ -77,7 +82,7 @@ def review_command(
         _exit_with_error(error)
 
     typer.echo("CodeRecall review context")
-    typer.echo(f"Repository root: {repository.root}")
+    typer.echo(f"Repository root: {_format_path(repository.root)}")
     typer.echo(f"Current branch: {repository.current_branch}")
     typer.echo(f"Base branch: {selected_base}")
     typer.echo(f"Merge base: {diff.merge_base[:12]}")

@@ -10,6 +10,7 @@ import pytest
 from coderecall.core.errors import (
     BaseBranchNotFound,
     DetachedHead,
+    DiffCollectionFailed,
     GitCommandFailed,
     NotGitRepository,
 )
@@ -184,3 +185,30 @@ def test_select_base_branch_fails_when_inference_is_impossible(tmp_path: Path) -
 
     assert "could not infer a base branch" in captured.value.message
     assert "main, master" in (captured.value.debug_details or "")
+
+
+def test_find_merge_base_reports_unrelated_histories(tmp_path: Path) -> None:
+    initialize_repository(tmp_path, "main")
+    commit_file(tmp_path)
+    run_git(tmp_path, "checkout", "--quiet", "--orphan", "isolated")
+    (tmp_path / "tracked.txt").unlink()
+    (tmp_path / "isolated.txt").write_text("unrelated history\n")
+    run_git(tmp_path, "add", "--all")
+    run_git(
+        tmp_path,
+        "-c",
+        "user.name=CodeRecall Tests",
+        "-c",
+        "user.email=tests@coderecall.local",
+        "commit",
+        "--quiet",
+        "-m",
+        "Isolated commit",
+    )
+    git = GitAdapter(tmp_path)
+
+    with pytest.raises(DiffCollectionFailed) as captured:
+        git.find_merge_base(git.detect_repository(), "main")
+
+    assert "could not find a merge base" in captured.value.message
+    assert "shares history" in (captured.value.recovery or "")
