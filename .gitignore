@@ -1,0 +1,9 @@
+# Local planning and brainstorming documents.
+docs/
+
+# Local CodeRecall outputs.
+coderecall-report.md
+.coderecall/
+
+# OS/editor noise.
+.DS_Store
