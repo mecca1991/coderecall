@@ -10,13 +10,21 @@ CodeRecall is in early project setup. The Python CLI scaffold is available, but 
 
 ## Intended Usage
 
-Once implemented, the main workflow will be:
+The main workflow is:
 
 ```bash
 coderecall review --base main
 ```
 
-The command will:
+Git repository detection, base selection, and change collection are available. Question generation and reporting are still under development.
+
+By default, `review` compares commits on the current branch with their merge base on the selected branch. To also include staged and unstaged changes to tracked files, run:
+
+```bash
+coderecall review --base main --include-uncommitted
+```
+
+Untracked files are excluded until they are added to Git. The command will eventually:
 
 1. Compare the current branch against a base branch.
 2. Summarize the meaningful code changes.

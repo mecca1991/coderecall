@@ -70,6 +70,17 @@ class ChangedFile:
 
 
 @dataclass(frozen=True)
+class DiffCollection:
+    """Structured Git changes collected for one review run."""
+
+    merge_base: str
+    changed_files: tuple[ChangedFile, ...] = ()
+    diff_hunks: tuple[DiffHunk, ...] = ()
+    uncertainty_notes: tuple[str, ...] = ()
+    includes_uncommitted: bool = False
+
+
+@dataclass(frozen=True)
 class FilteredFile:
     """A file excluded from the main reasoning context."""
 

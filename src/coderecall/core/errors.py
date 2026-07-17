@@ -31,5 +31,9 @@ class BaseBranchNotFound(CodeRecallError):
     """Raised when no valid comparison base can be selected."""
 
 
+class DiffCollectionFailed(CodeRecallError):
+    """Raised when Git diff data cannot be collected or parsed."""
+
+
 class GitCommandFailed(CodeRecallError):
     """Raised when a Git command cannot be executed successfully."""

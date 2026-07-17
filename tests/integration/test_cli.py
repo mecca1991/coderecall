@@ -9,6 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from coderecall.cli.app import app
+from coderecall.cli.commands.review import _format_changed_file
+from coderecall.core.types import ChangedFile, FileStatus
 
 runner = CliRunner()
 
@@ -74,6 +76,23 @@ def test_review_reports_repository_context(
         cwd=tmp_path,
         check=True,
     )
+    tracked.write_text("second revision\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Feature change",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["review"])
@@ -82,6 +101,8 @@ def test_review_reports_repository_context(
     assert "Current branch: feature/cli-context" in result.output
     assert "Repository root:" in result.output
     assert "Base branch: main" in result.output
+    assert "Changed files: 1" in result.output
+    assert 'modified: "tracked.txt"' in result.output
 
 
 def test_review_fails_clearly_outside_repository(
@@ -169,3 +190,17 @@ def test_review_rejects_explicit_empty_base(
 
     assert result.exit_code == 1
     assert "Base branch cannot be empty." in result.output
+
+
+def test_changed_file_paths_are_escaped_for_terminal_output() -> None:
+    changed_file = ChangedFile(
+        path=Path("line\nbreak-\x1b[31m.py"),
+        status=FileStatus.MODIFIED,
+    )
+
+    rendered = _format_changed_file(changed_file)
+
+    assert "\n" not in rendered
+    assert "\x1b" not in rendered
+    assert "\\n" in rendered
+    assert "\\u001b" in rendered
