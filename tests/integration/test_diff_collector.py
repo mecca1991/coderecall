@@ -5,6 +5,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from coderecall.core.errors import DiffCollectionFailed
 from coderecall.core.types import DiffCollection, FileStatus
 from coderecall.git import DiffCollector, GitAdapter
 
@@ -37,10 +40,17 @@ def collect_changes(
     *,
     include_uncommitted: bool = False,
     max_patch_bytes: int = 1_000_000,
+    max_total_patch_bytes: int = 16 * 1024 * 1024,
+    max_changed_files: int = 1_000,
 ) -> DiffCollection:
     git = GitAdapter(directory)
     repository = git.detect_repository()
-    return DiffCollector(git, max_patch_bytes=max_patch_bytes).collect(
+    return DiffCollector(
+        git,
+        max_patch_bytes=max_patch_bytes,
+        max_total_patch_bytes=max_total_patch_bytes,
+        max_changed_files=max_changed_files,
+    ).collect(
         repository,
         "main",
         include_uncommitted=include_uncommitted,
@@ -150,6 +160,92 @@ def test_binary_marker_in_text_content_does_not_discard_hunks(tmp_path: Path) ->
     assert "GIT binary patch" in changed_file.hunks[0].patch
 
 
+def test_unicode_line_separator_does_not_create_fabricated_hunk(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    (tmp_path / "unicode.txt").write_text("base\n")
+    commit_all(tmp_path, "Add Unicode fixture")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/unicode-separator")
+
+    (tmp_path / "unicode.txt").write_text("prefix\u2028@@ -1 +1 @@\n")
+    commit_all(tmp_path, "Add Unicode line separator")
+
+    collection = collect_changes(tmp_path)
+    changed_file = collection.changed_files[0]
+
+    assert len(changed_file.hunks) == 1
+    assert "prefix\u2028@@ -1 +1 @@" in changed_file.hunks[0].patch
+
+
+def test_aggregate_patch_and_file_count_limits_are_enforced(tmp_path: Path) -> None:
+    initialize_repository(tmp_path)
+    for index in range(3):
+        (tmp_path / f"file-{index}.txt").write_text("base\n")
+    commit_all(tmp_path, "Add aggregate fixtures")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/aggregate-limit")
+
+    for index in range(3):
+        (tmp_path / f"file-{index}.txt").write_text(str(index) * 400 + "\n")
+    commit_all(tmp_path, "Expand aggregate fixtures")
+
+    collection = collect_changes(
+        tmp_path,
+        max_patch_bytes=2_000,
+        max_total_patch_bytes=800,
+    )
+
+    assert any(changed_file.hunks for changed_file in collection.changed_files)
+    assert any(not changed_file.hunks for changed_file in collection.changed_files)
+    assert any(
+        "buffered patch data exceeds 800 bytes" in note for note in collection.uncertainty_notes
+    )
+
+    with pytest.raises(DiffCollectionFailed) as captured:
+        collect_changes(tmp_path, max_changed_files=2)
+
+    assert "more than 2 changed files" in captured.value.message
+
+
+def test_submodule_patch_format_ignores_repository_configuration(tmp_path: Path) -> None:
+    dependency = tmp_path / "dependency-repository"
+    project = tmp_path / "project"
+    dependency.mkdir()
+    project.mkdir()
+    initialize_repository(dependency)
+    (dependency / "version.txt").write_text("version 1\n")
+    commit_all(dependency, "Dependency version 1")
+
+    initialize_repository(project)
+    run_git(
+        project,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--quiet",
+        str(dependency),
+        "vendor/dependency",
+    )
+    commit_all(project, "Add dependency submodule")
+    run_git(project, "checkout", "--quiet", "-b", "feature/update-dependency")
+
+    checked_out_dependency = project / "vendor" / "dependency"
+    run_git(checked_out_dependency, "config", "user.name", "CodeRecall Tests")
+    run_git(checked_out_dependency, "config", "user.email", "tests@coderecall.local")
+    (checked_out_dependency / "version.txt").write_text("version 2\n")
+    commit_all(checked_out_dependency, "Dependency version 2")
+    commit_all(project, "Update dependency submodule")
+
+    for configured_format in ("log", "diff"):
+        run_git(project, "config", "diff.submodule", configured_format)
+        collection = collect_changes(project)
+
+        assert len(collection.changed_files) == 1
+        changed_file = collection.changed_files[0]
+        assert changed_file.path == Path("vendor/dependency")
+        assert changed_file.status is FileStatus.MODIFIED
+        assert len(changed_file.hunks) == 1
+
+
 def test_binary_and_large_patches_are_reported_without_hunks(tmp_path: Path) -> None:
     initialize_repository(tmp_path)
     (tmp_path / "asset.bin").write_bytes(b"\x00base\x01")
@@ -164,16 +260,18 @@ def test_binary_and_large_patches_are_reported_without_hunks(tmp_path: Path) -> 
     git = GitAdapter(tmp_path)
     repository = git.detect_repository()
     merge_base = git.find_merge_base(repository, "main")
-    patch_records = git.collect_patch_records(
+    raw_diff = git.collect_diff(
         repository,
         merge_base,
         max_patch_bytes=200,
+        max_total_patch_bytes=1_000,
+        max_changed_files=10,
     )
     collection = DiffCollector(git, max_patch_bytes=200).collect(repository, "main")
     by_path = {changed.path: changed for changed in collection.changed_files}
 
-    assert patch_records[-1].oversized is True
-    assert patch_records[-1].content is None
+    assert raw_diff.patch_records[-1].oversized is True
+    assert raw_diff.patch_records[-1].content is None
     assert by_path[Path("asset.bin")].is_binary is True
     assert by_path[Path("asset.bin")].hunks == ()
     assert by_path[Path("large.txt")].hunks == ()

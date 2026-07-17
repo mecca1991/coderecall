@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, Literal, cast
 
 from coderecall.core.errors import (
     BaseBranchNotFound,
@@ -20,6 +20,7 @@ from coderecall.core.types import RepositoryContext
 
 _PATCH_READ_SIZE = 64 * 1024
 _PATCH_RECORD_HEADER = b"diff --git "
+_RAW_METADATA_BYTES_PER_FILE = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,46 @@ class RawPatchRecord:
     """One bounded file record from a Git patch stream."""
 
     content: bytes | None
-    oversized: bool = False
+    limit_reason: Literal["file", "aggregate"] | None = None
+
+    @property
+    def oversized(self) -> bool:
+        return self.limit_reason is not None
+
+
+@dataclass(frozen=True)
+class RawDiffOutput:
+    """Atomic raw metadata and bounded patch records from one Git process."""
+
+    metadata: bytes
+    patch_records: tuple[RawPatchRecord, ...]
+
+
+class _PrefixedReader:
+    """Read an initial byte prefix before continuing from a binary stream."""
+
+    def __init__(self, prefix: bytes, stream: BinaryIO) -> None:
+        self.prefix = prefix
+        self.stream = stream
+
+    def readline(self, size: int) -> bytes:
+        if not self.prefix:
+            return self.stream.readline(size)
+
+        newline = self.prefix.find(b"\n", 0, size)
+        if newline >= 0:
+            end = newline + 1
+            result = self.prefix[:end]
+            self.prefix = self.prefix[end:]
+            return result
+
+        result = self.prefix[:size]
+        self.prefix = self.prefix[size:]
+        if len(result) == size or self.prefix:
+            return result
+
+        remainder = self.stream.readline(size - len(result))
+        return result + remainder
 
 
 class GitAdapter:
@@ -132,47 +172,29 @@ class GitAdapter:
             self._raise_missing_merge_base(base_branch)
         return merge_bases[0]
 
-    def collect_name_status(
-        self,
-        repository: RepositoryContext,
-        merge_base: str,
-        *,
-        include_uncommitted: bool = False,
-    ) -> str:
-        """Return NUL-delimited changed-file metadata from Git."""
-
-        revisions = self._diff_revisions(merge_base, include_uncommitted)
-        arguments = (
-            "diff",
-            "--name-status",
-            "-z",
-            "--find-renames",
-            "--no-ext-diff",
-            *revisions,
-            "--",
-        )
-        result = self._run(*arguments, cwd=repository.root)
-        if result.returncode != 0:
-            self._raise_diff_failure(result, *arguments)
-        return result.stdout
-
-    def collect_patch_records(
+    def collect_diff(
         self,
         repository: RepositoryContext,
         merge_base: str,
         *,
         max_patch_bytes: int,
+        max_total_patch_bytes: int,
+        max_changed_files: int,
         include_uncommitted: bool = False,
-    ) -> tuple[RawPatchRecord, ...]:
-        """Stream bounded patch records for all changed files in diff order."""
+    ) -> RawDiffOutput:
+        """Stream atomic file metadata and bounded patches in diff order."""
 
         revisions = self._diff_revisions(merge_base, include_uncommitted)
         arguments = (
             "diff",
+            "--raw",
+            "-z",
+            "--patch",
             "--no-color",
             "--no-ext-diff",
             "--no-textconv",
             "--find-renames",
+            "--submodule=short",
             "--unified=80",
             *revisions,
             "--",
@@ -197,8 +219,11 @@ class GitAdapter:
                         debug_details=self._display_command(*arguments),
                     )
                 try:
-                    records = self._read_patch_records(
-                        cast(BinaryIO, process.stdout), max_patch_bytes
+                    output = self._read_diff_output(
+                        cast(BinaryIO, process.stdout),
+                        max_patch_bytes=max_patch_bytes,
+                        max_total_patch_bytes=max_total_patch_bytes,
+                        max_changed_files=max_changed_files,
                     )
                 except BaseException:
                     process.kill()
@@ -226,7 +251,7 @@ class GitAdapter:
         if return_code != 0:
             result = subprocess.CompletedProcess(command, return_code, "", stderr)
             self._raise_diff_failure(result, *arguments)
-        return records
+        return output
 
     def _ref_exists(self, root: Path, reference: str) -> bool:
         result = self._run(
@@ -319,16 +344,78 @@ class GitAdapter:
         )
 
     @staticmethod
-    def _read_patch_records(
+    def _read_diff_output(
         stdout: BinaryIO,
+        *,
         max_patch_bytes: int,
+        max_total_patch_bytes: int,
+        max_changed_files: int,
+    ) -> RawDiffOutput:
+        metadata = bytearray()
+        trailing_null = b""
+
+        while True:
+            chunk = stdout.read(_PATCH_READ_SIZE)
+            if not chunk:
+                if metadata or trailing_null:
+                    raise DiffCollectionFailed(
+                        "Git returned incomplete raw diff metadata.",
+                        recovery="Run the command again after checking the repository state.",
+                    )
+                return RawDiffOutput(metadata=b"", patch_records=())
+
+            combined = trailing_null + chunk
+            separator = combined.find(b"\0\0")
+            if separator >= 0:
+                metadata.extend(combined[:separator])
+                patch_prefix = combined[separator + 2 :]
+                break
+
+            if combined.endswith(b"\0"):
+                metadata.extend(combined[:-1])
+                trailing_null = b"\0"
+            else:
+                metadata.extend(combined)
+                trailing_null = b""
+
+            max_metadata_bytes = max_changed_files * _RAW_METADATA_BYTES_PER_FILE
+            if len(metadata) > max_metadata_bytes:
+                raise DiffCollectionFailed(
+                    "Git diff metadata exceeds CodeRecall's safety limit.",
+                    recovery="Review a smaller change or raise the configured file limit.",
+                )
+
+        patch_reader = _PrefixedReader(patch_prefix, stdout)
+        patch_records = GitAdapter._read_patch_records(
+            patch_reader,
+            max_patch_bytes=max_patch_bytes,
+            max_total_patch_bytes=max_total_patch_bytes,
+            max_changed_files=max_changed_files,
+        )
+        return RawDiffOutput(metadata=bytes(metadata), patch_records=patch_records)
+
+    @staticmethod
+    def _read_patch_records(
+        stdout: _PrefixedReader,
+        *,
+        max_patch_bytes: int,
+        max_total_patch_bytes: int,
+        max_changed_files: int,
     ) -> tuple[RawPatchRecord, ...]:
         records: list[RawPatchRecord] = []
         current_parts: list[bytes] = []
         current_size = 0
-        current_oversized = False
+        current_limit_reason: Literal["file", "aggregate"] | None = None
+        total_buffered_bytes = 0
         in_record = False
         at_line_start = True
+
+        def finish_record() -> None:
+            nonlocal total_buffered_bytes
+            content = None if current_limit_reason is not None else b"".join(current_parts)
+            records.append(RawPatchRecord(content=content, limit_reason=current_limit_reason))
+            if content is not None:
+                total_buffered_bytes += len(content)
 
         while True:
             fragment = stdout.readline(_PATCH_READ_SIZE)
@@ -337,32 +424,30 @@ class GitAdapter:
             starts_record = at_line_start and fragment.startswith(_PATCH_RECORD_HEADER)
             if starts_record:
                 if in_record:
-                    records.append(
-                        RawPatchRecord(
-                            content=None if current_oversized else b"".join(current_parts),
-                            oversized=current_oversized,
-                        )
+                    finish_record()
+                if len(records) >= max_changed_files:
+                    raise DiffCollectionFailed(
+                        f"Git diff contains more than {max_changed_files:,} changed files.",
+                        recovery="Review a smaller change or raise the configured file limit.",
                     )
                 in_record = True
                 current_parts = []
                 current_size = 0
-                current_oversized = False
+                current_limit_reason = None
 
-            if in_record and not current_oversized:
+            if in_record and current_limit_reason is None:
                 current_size += len(fragment)
                 if current_size > max_patch_bytes:
                     current_parts.clear()
-                    current_oversized = True
+                    current_limit_reason = "file"
+                elif total_buffered_bytes + current_size > max_total_patch_bytes:
+                    current_parts.clear()
+                    current_limit_reason = "aggregate"
                 else:
                     current_parts.append(fragment)
 
             at_line_start = fragment.endswith(b"\n")
 
         if in_record:
-            records.append(
-                RawPatchRecord(
-                    content=None if current_oversized else b"".join(current_parts),
-                    oversized=current_oversized,
-                )
-            )
+            finish_record()
         return tuple(records)
