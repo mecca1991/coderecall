@@ -6,9 +6,7 @@ It analyzes the current Git branch, asks a few targeted questions about the chan
 
 ## Status
 
-CodeRecall is in early project setup. The runnable CLI implementation is not yet available in this repository.
-
-This README should stay focused on installation, setup, usage, and contribution details for developers working with the public project.
+CodeRecall is in early project setup. The Python CLI scaffold is available, but the full review workflow is still under active development.
 
 ## Intended Usage
 
@@ -43,15 +41,41 @@ git clone https://github.com/mecca1991/coderecall.git
 cd coderecall
 ```
 
-There is no package installation step yet because the implementation has not been added.
+CodeRecall requires Python 3.11 or newer.
 
-When the CLI lands, this section should include:
+Recommended setup with `uv`:
 
-- Required language/runtime version.
-- Dependency installation command.
-- Local test command.
-- Local lint/typecheck command.
-- How to run the CLI from source.
+```bash
+uv sync
+uv run coderecall --help
+```
+
+Standard `pip` setup:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+coderecall --help
+```
+
+Run tests:
+
+```bash
+uv run pytest
+```
+
+Run linting:
+
+```bash
+uv run ruff check .
+```
+
+Run type checking:
+
+```bash
+uv run mypy
+```
 
 ## Local Files
 

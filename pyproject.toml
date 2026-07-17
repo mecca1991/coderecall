@@ -1,0 +1,71 @@
+[project]
+name = "coderecall"
+version = "0.1.0"
+description = "A local CLI that helps developers check their understanding of code changes before review."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "CodeRecall contributors" },
+]
+keywords = ["cli", "git", "code-review", "developer-tools", "learning"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "rich>=13.9.4",
+  "typer>=0.16.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mecca1991/coderecall"
+Repository = "https://github.com/mecca1991/coderecall"
+Issues = "https://github.com/mecca1991/coderecall/issues"
+
+[project.scripts]
+coderecall = "coderecall.cli.app:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.16.1",
+  "pytest>=8.4.1",
+  "ruff>=0.12.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.16.1",
+  "pytest>=8.4.1",
+  "ruff>=0.12.4",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_optional = true

@@ -7,3 +7,14 @@ coderecall-report.md
 
 # OS/editor noise.
 .DS_Store
+
+# Python local development artifacts.
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
