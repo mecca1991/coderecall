@@ -9,8 +9,21 @@ import pytest
 from typer.testing import CliRunner
 
 from coderecall.cli.app import app
-from coderecall.cli.commands.review import _format_changed_file, _format_filtered_file
-from coderecall.core.types import ChangedFile, FileStatus, FilteredFile, FilterReason
+from coderecall.cli.commands.review import (
+    _format_changed_file,
+    _format_filtered_file,
+    _render_diff_summary,
+)
+from coderecall.core.types import (
+    ChangedFile,
+    DiffSummary,
+    EvidenceCitation,
+    FileStatus,
+    FilteredFile,
+    FilterReason,
+    LikelySideEffect,
+    SideEffectKind,
+)
 
 runner = CliRunner()
 
@@ -103,6 +116,11 @@ def test_review_reports_repository_context(
     assert "Base branch: main" in result.output
     assert "Changed files: 1" in result.output
     assert 'modified: "tracked.txt"' in result.output
+    assert "Diff summary" in result.output
+    assert "Purpose: Likely updates code in 1 meaningful file." in result.output
+    assert result.output.index("Diff summary") < result.output.index(
+        "Question and report generation are not implemented yet."
+    )
 
 
 def test_review_reports_filtered_files_and_reasons(
@@ -282,3 +300,93 @@ def test_filtered_file_paths_are_escaped_for_terminal_output() -> None:
     assert "\x1b" not in rendered
     assert "\\n" in rendered
     assert "\\u001b" in rendered
+
+
+def test_diff_summary_renderer_is_concise_and_escapes_paths() -> None:
+    unsafe_path = Path("src/line\nbreak-\x1b[31m.py")
+    summary = DiffSummary(
+        purpose="Likely updates `run` across 2 meaningful files, with a file write signal.",
+        relevant_files=(unsafe_path, Path("tests/test_run.py")),
+        tests=(Path("tests/test_run.py"),),
+        side_effects=(
+            LikelySideEffect(
+                kind=SideEffectKind.FILE_WRITE,
+                description="The change may write to a local file.",
+                evidence=(EvidenceCitation(kind="call", file_path=unsafe_path, symbol="open"),),
+            ),
+        ),
+        uncertainty_notes=("Call evidence was incomplete.",),
+    )
+
+    rendered = "\n".join(_render_diff_summary(summary))
+
+    assert "Purpose: Likely updates `run`" in rendered
+    assert "Relevant files:" in rendered
+    assert "Tests found:" in rendered
+    assert "Likely side effects:" in rendered
+    assert "Uncertainty:" in rendered
+    assert "\x1b" not in rendered
+    assert "src/line\nbreak" not in rendered
+    assert '"src/line\\nbreak-\\u001b[31m.py"' in rendered
+
+
+def test_review_stops_before_questions_when_every_change_is_filtered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "main"],
+        cwd=tmp_path,
+        check=True,
+    )
+    lockfile = tmp_path / "package-lock.json"
+    lockfile.write_text('{"lockfileVersion": 3}\n')
+    subprocess.run(["git", "add", "package-lock.json"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Initial commit",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "feature/lockfile-only"],
+        cwd=tmp_path,
+        check=True,
+    )
+    lockfile.write_text('{"lockfileVersion": 3, "changed": true}\n')
+    subprocess.run(["git", "add", "package-lock.json"], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=CodeRecall Tests",
+            "-c",
+            "user.email=tests@coderecall.local",
+            "commit",
+            "--quiet",
+            "-m",
+            "Update lockfile",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["review", "--plain"])
+
+    assert result.exit_code == 0
+    assert "Files for analysis: 0" in result.output
+    assert 'modified: "package-lock.json" (filtered: lockfile)' in result.output
+    assert "Purpose: No meaningful code changes were available to summarize." in result.output
+    assert "Questions:" not in result.output
+    assert "Question and report generation are not implemented yet." not in result.output
