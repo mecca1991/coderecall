@@ -12,28 +12,36 @@ from coderecall.core.types import (
     ChangedFile,
     EvidenceCitation,
     FileStatus,
+    LikelySideEffect,
     Question,
     QuestionCategory,
     Report,
+    SideEffectKind,
 )
 
 
 def test_change_context_captures_changed_and_filtered_files() -> None:
     changed_file = ChangedFile(path=Path("app/payments.py"), status=FileStatus.MODIFIED)
+    citation = EvidenceCitation(kind="call", file_path=changed_file.path, symbol="processor.charge")
+    side_effect = LikelySideEffect(
+        kind=SideEffectKind.NETWORK_CALL,
+        description="The change likely makes an external network call.",
+        evidence=(citation,),
+    )
 
     context = ChangeContext(
         repo_root=Path("/repo"),
         current_branch="feature/payment-idempotency",
         base_branch="main",
         changed_files=(changed_file,),
-        likely_side_effects=("external API call",),
+        likely_side_effects=(side_effect,),
         uncertainty_notes=("Could not trace every downstream side effect.",),
     )
 
     assert context.current_branch == "feature/payment-idempotency"
     assert context.base_branch == "main"
     assert context.changed_files == (changed_file,)
-    assert context.likely_side_effects == ("external API call",)
+    assert context.likely_side_effects == (side_effect,)
     assert context.uncertainty_notes
 
 
