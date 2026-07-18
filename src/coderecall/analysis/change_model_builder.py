@@ -236,6 +236,7 @@ class ChangeModelBuilder:
     ) -> tuple[tuple[ChangedSymbol, ...], tuple[CodeReference, ...], tuple[CodeReference, ...]]:
         tree = ast.parse(source, filename=str(changed_file.path))
         added_lines = ChangeModelBuilder._added_line_numbers(changed_file.hunks)
+        affected_lines = ChangeModelBuilder._affected_line_numbers(changed_file.hunks)
         nodes = sorted(
             ast.walk(tree),
             key=lambda node: (getattr(node, "lineno", 0), getattr(node, "col_offset", 0)),
@@ -247,7 +248,7 @@ class ChangeModelBuilder:
         for node in nodes:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 end_line = node.end_lineno or node.lineno
-                if any(node.lineno <= line <= end_line for line in added_lines):
+                if any(node.lineno <= line <= end_line for line in affected_lines):
                     kind = "class"
                     if isinstance(node, ast.AsyncFunctionDef):
                         kind = "async function"
@@ -283,11 +284,27 @@ class ChangeModelBuilder:
         source: str,
     ) -> tuple[tuple[ChangedSymbol, ...], tuple[CodeReference, ...], tuple[CodeReference, ...]]:
         added_lines = ChangeModelBuilder._added_line_numbers(changed_file.hunks)
+        affected_lines = ChangeModelBuilder._affected_line_numbers(changed_file.hunks)
         symbols: list[ChangedSymbol] = []
         imports: list[CodeReference] = []
         calls: list[CodeReference] = []
+        lines = source.split("\n")
+        declarations: dict[int, ChangedSymbol] = {}
 
-        for line_number, line in enumerate(source.split("\n"), start=1):
+        for line_number, line in enumerate(lines, start=1):
+            declaration = ChangeModelBuilder._javascript_declaration(
+                changed_file,
+                line,
+                line_number,
+            )
+            if declaration is None:
+                continue
+            declarations[line_number] = declaration
+            end_line = ChangeModelBuilder._javascript_block_end(lines, line_number)
+            if any(line_number <= changed_line <= end_line for changed_line in affected_lines):
+                symbols.append(declaration)
+
+        for line_number, line in enumerate(lines, start=1):
             import_match = _JS_IMPORT_FROM.match(line) or _JS_IMPORT_SIDE_EFFECT.match(line)
             if import_match is not None:
                 imports.append(
@@ -305,66 +322,8 @@ class ChangeModelBuilder:
 
             if line_number not in added_lines:
                 continue
-            function_match = _JS_FUNCTION.match(line)
-            class_match = _JS_CLASS.match(line)
-            arrow_match = _JS_ARROW.match(line)
-            export_match = _JS_EXPORT.match(line)
-            method_match = _JS_METHOD.match(line)
-            declared_name: str | None = None
-            if function_match is not None:
-                kind = "async function" if function_match.group(1) else "function"
-                declared_name = function_match.group(2)
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        function_match.group(2),
-                        kind,
-                        line_number,
-                    )
-                )
-            elif class_match is not None:
-                declared_name = class_match.group(1)
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        class_match.group(1),
-                        "class",
-                        line_number,
-                    )
-                )
-            elif arrow_match is not None:
-                kind = "async function" if arrow_match.group(2) else "function"
-                declared_name = arrow_match.group(1)
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        arrow_match.group(1),
-                        kind,
-                        line_number,
-                    )
-                )
-            elif export_match is not None:
-                declared_name = export_match.group(1)
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        export_match.group(1),
-                        "export",
-                        line_number,
-                    )
-                )
-            elif method_match is not None and method_match.group("name") not in _NON_CALL_PREFIXES:
-                modifiers = method_match.group("modifiers").split()
-                kind = "async method" if "async" in modifiers else "method"
-                declared_name = method_match.group("name")
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        declared_name,
-                        kind,
-                        line_number,
-                    )
-                )
+            declaration = declarations.get(line_number)
+            declared_name = declaration.name if declaration is not None else None
 
             for call_match in _JS_CALL.finditer(line):
                 call_name = call_match.group(1)
@@ -387,6 +346,54 @@ class ChangeModelBuilder:
         if not symbols:
             symbols.extend(ChangeModelBuilder._symbols_from_hunk_context(changed_file))
         return tuple(symbols), tuple(imports), tuple(calls)
+
+    @staticmethod
+    def _javascript_declaration(
+        changed_file: ChangedFile,
+        line: str,
+        line_number: int,
+    ) -> ChangedSymbol | None:
+        function_match = _JS_FUNCTION.match(line)
+        if function_match is not None:
+            kind = "async function" if function_match.group(1) else "function"
+            return ChangedSymbol(changed_file.path, function_match.group(2), kind, line_number)
+
+        class_match = _JS_CLASS.match(line)
+        if class_match is not None:
+            return ChangedSymbol(changed_file.path, class_match.group(1), "class", line_number)
+
+        arrow_match = _JS_ARROW.match(line)
+        if arrow_match is not None:
+            kind = "async function" if arrow_match.group(2) else "function"
+            return ChangedSymbol(changed_file.path, arrow_match.group(1), kind, line_number)
+
+        export_match = _JS_EXPORT.match(line)
+        if export_match is not None:
+            return ChangedSymbol(changed_file.path, export_match.group(1), "export", line_number)
+
+        method_match = _JS_METHOD.match(line)
+        if method_match is None or method_match.group("name") in _NON_CALL_PREFIXES:
+            return None
+        modifiers = method_match.group("modifiers").split()
+        kind = "async method" if "async" in modifiers else "method"
+        return ChangedSymbol(changed_file.path, method_match.group("name"), kind, line_number)
+
+    @staticmethod
+    def _javascript_block_end(lines: list[str], declaration_line: int) -> int:
+        depth = 0
+        found_opening_brace = False
+        for line_number in range(declaration_line, len(lines) + 1):
+            line = lines[line_number - 1]
+            opening_braces = line.count("{")
+            closing_braces = line.count("}")
+            if opening_braces:
+                found_opening_brace = True
+            if not found_opening_brace:
+                continue
+            depth += opening_braces - closing_braces
+            if depth <= 0:
+                return line_number
+        return declaration_line
 
     @staticmethod
     def _symbols_from_hunk_context(changed_file: ChangedFile) -> tuple[ChangedSymbol, ...]:
@@ -437,6 +444,26 @@ class ChangeModelBuilder:
                 elif not line.startswith("-") and not line.startswith("\\"):
                     new_line += 1
         return frozenset(added_lines)
+
+    @staticmethod
+    def _affected_line_numbers(hunks: tuple[DiffHunk, ...]) -> frozenset[int]:
+        affected_lines: set[int] = set()
+        for hunk in hunks:
+            new_line = hunk.new_start or 0
+            for line in hunk.patch.split("\n")[1:]:
+                if not line:
+                    continue
+                if line.startswith("+"):
+                    affected_lines.add(new_line)
+                    new_line += 1
+                elif line.startswith("-"):
+                    if new_line > 0:
+                        affected_lines.add(new_line)
+                    if new_line > 1:
+                        affected_lines.add(new_line - 1)
+                elif not line.startswith("\\"):
+                    new_line += 1
+        return frozenset(affected_lines)
 
     @staticmethod
     def _python_call_name(node: ast.expr) -> str | None:

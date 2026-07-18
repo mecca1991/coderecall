@@ -309,6 +309,75 @@ def test_distinguishes_typescript_methods_from_calls(tmp_path: Path) -> None:
     assert [reference.name for reference in context.call_sites] == ["processor.charge"]
 
 
+def test_identifies_python_symbol_for_deletion_only_hunk(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "service.py"
+    source_path.parent.mkdir()
+    source_path.write_text("def run():\n    return True\n")
+    hunk = DiffHunk(
+        file_path=Path("src/service.py"),
+        header="@@ -1,3 +1,2 @@",
+        old_start=1,
+        old_lines=3,
+        new_start=1,
+        new_lines=2,
+        patch="@@ -1,3 +1,2 @@\n def run():\n-    audit()\n     return True\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("src/service.py"),
+                status=FileStatus.MODIFIED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/remove-audit")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [symbol.name for symbol in context.changed_symbols] == ["run"]
+
+
+def test_identifies_typescript_symbol_for_body_only_edit(tmp_path: Path) -> None:
+    source_path = tmp_path / "web" / "client.ts"
+    source_path.parent.mkdir()
+    source_path.write_text("export function run() {\n  return api.fetch();\n}\n")
+    hunk = DiffHunk(
+        file_path=Path("web/client.ts"),
+        header="@@ -1,3 +1,3 @@",
+        old_start=1,
+        old_lines=3,
+        new_start=1,
+        new_lines=3,
+        patch=(
+            "@@ -1,3 +1,3 @@\n"
+            " export function run() {\n"
+            "-  return oldValue;\n"
+            "+  return api.fetch();\n"
+            " }\n"
+        ),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("web/client.ts"),
+                status=FileStatus.MODIFIED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/client")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
+        ("run", "function")
+    ]
+    assert [reference.name for reference in context.call_sites] == ["api.fetch"]
+
+
 def test_uses_hunk_context_when_python_source_is_invalid(tmp_path: Path) -> None:
     source_path = tmp_path / "src" / "broken.py"
     source_path.parent.mkdir()
