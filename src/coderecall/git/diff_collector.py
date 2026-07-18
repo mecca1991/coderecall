@@ -77,7 +77,8 @@ class DiffCollector:
     ) -> DiffCollection:
         """Collect one structured comparison against the selected base branch."""
 
-        merge_base = self.git.find_merge_base(repository, base_branch)
+        source_revision = self.git.resolve_revision(repository, "HEAD")
+        merge_base = self.git.find_merge_base(repository, base_branch, source_revision)
         filter_result: FileFilterResult | None = None
 
         def select_records(metadata: bytes) -> tuple[bool, ...]:
@@ -101,6 +102,7 @@ class DiffCollector:
             max_raw_metadata_bytes=self.max_raw_metadata_bytes,
             record_selector=select_records if self.file_filter is not None else None,
             include_uncommitted=include_uncommitted,
+            target_revision=source_revision,
         )
         if filter_result is None:
             changed_files = self._parse_raw_metadata(
@@ -166,6 +168,7 @@ class DiffCollector:
             diff_hunks=tuple(all_hunks),
             uncertainty_notes=tuple(uncertainty_notes),
             includes_uncommitted=include_uncommitted,
+            source_revision=source_revision,
         )
 
     @staticmethod
