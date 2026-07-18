@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,15 +30,42 @@ _LANGUAGES_BY_SUFFIX = {
     ".cts": "typescript",
 }
 _TEST_DIRECTORIES = frozenset({"test", "tests", "__tests__"})
+_JS_FUNCTION = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:(async)\s+)?function\s+([A-Za-z_$][\w$]*)"
+)
+_JS_CLASS = re.compile(r"^\s*(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)")
+_JS_ARROW = re.compile(
+    r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*"
+    r"(?:(async)\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=>"
+)
+_JS_EXPORT = re.compile(r"^\s*export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=")
+_JS_METHOD = re.compile(
+    r"^\s*(?P<modifiers>(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*)"
+    r"(?P<name>[A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::[^{]+)?\{"
+)
+_JS_IMPORT_FROM = re.compile(r"^\s*import\s+.+?\s+from\s+['\"]([^'\"]+)['\"]")
+_JS_IMPORT_SIDE_EFFECT = re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]")
+_JS_REQUIRE = re.compile(r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)")
+_JS_CALL = re.compile(r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
+_NON_CALL_PREFIXES = frozenset({"catch", "class", "for", "function", "if", "switch", "while"})
+_PYTHON_HUNK_SYMBOL = re.compile(r"^(?:(async)\s+)?(def|class)\s+([A-Za-z_]\w*)")
 
 
 class ChangeModelBuilder:
     """Transform collected Git evidence into a change context."""
 
-    def __init__(self, *, max_source_bytes: int = 256_000) -> None:
+    def __init__(
+        self,
+        *,
+        max_source_bytes: int = 256_000,
+        max_evidence_per_file: int = 200,
+    ) -> None:
         if max_source_bytes < 1:
             raise ValueError("max_source_bytes must be positive")
+        if max_evidence_per_file < 1:
+            raise ValueError("max_evidence_per_file must be positive")
         self.max_source_bytes = max_source_bytes
+        self.max_evidence_per_file = max_evidence_per_file
 
     def build(
         self,
@@ -57,27 +85,60 @@ class ChangeModelBuilder:
         nearby_imports: list[CodeReference] = []
         call_sites: list[CodeReference] = []
         uncertainty_notes = list(diff.uncertainty_notes)
+        unsupported_paths: list[Path] = []
+        heuristic_paths: list[Path] = []
 
         for changed_file in changed_files:
-            if changed_file.language != "python" or changed_file.is_binary:
+            if changed_file.is_binary:
+                continue
+            if changed_file.language not in {"python", "javascript", "typescript"}:
+                if changed_file.hunks:
+                    unsupported_paths.append(changed_file.path)
                 continue
             source, note = self._read_source(repository.root, changed_file.path)
             if note is not None:
                 uncertainty_notes.append(note)
             if source is None:
-                continue
-            try:
-                symbols, imports, calls = self._analyze_python(changed_file, source)
-            except SyntaxError:
+                symbols = self._symbols_from_hunk_context(changed_file)
+                imports: tuple[CodeReference, ...] = ()
+                calls: tuple[CodeReference, ...] = ()
+            elif changed_file.language == "python":
+                try:
+                    symbols, imports, calls = self._analyze_python(changed_file, source)
+                except (SyntaxError, ValueError):
+                    symbols = self._symbols_from_hunk_context(changed_file)
+                    imports = ()
+                    calls = ()
+                    uncertainty_notes.append(
+                        "Could not parse "
+                        f"{self._format_path(changed_file.path)} as Python; "
+                        "symbol extraction may be incomplete."
+                    )
+            else:
+                symbols, imports, calls = self._analyze_javascript(changed_file, source)
+                heuristic_paths.append(changed_file.path)
+            symbols, imports, calls, omitted = self._limit_evidence(symbols, imports, calls)
+            if omitted:
+                noun = "item" if omitted == 1 else "items"
                 uncertainty_notes.append(
-                    "Could not parse "
-                    f"{self._format_path(changed_file.path)} as Python; "
-                    "symbol extraction may be incomplete."
+                    f"Omitted {omitted:,} evidence {noun} for "
+                    f"{self._format_path(changed_file.path)} because the per-file limit is "
+                    f"{self.max_evidence_per_file:,}."
                 )
-                continue
             changed_symbols.extend(symbols)
             nearby_imports.extend(imports)
             call_sites.extend(calls)
+
+        if heuristic_paths:
+            uncertainty_notes.append(
+                "JavaScript/TypeScript symbol extraction is heuristic for: "
+                f"{self._format_path_summary(heuristic_paths)}."
+            )
+        if unsupported_paths:
+            uncertainty_notes.append(
+                "Symbol extraction is not available for: "
+                f"{self._format_path_summary(unsupported_paths)}."
+            )
 
         return ChangeContext(
             repo_root=repository.root,
@@ -87,16 +148,19 @@ class ChangeModelBuilder:
             changed_files=changed_files,
             filtered_files=diff.filtered_files,
             diff_hunks=diff.diff_hunks,
-            changed_symbols=tuple(changed_symbols),
-            nearby_imports=tuple(nearby_imports),
-            call_sites=tuple(call_sites),
+            changed_symbols=tuple(dict.fromkeys(changed_symbols)),
+            nearby_imports=tuple(dict.fromkeys(nearby_imports)),
+            call_sites=tuple(dict.fromkeys(call_sites)),
             related_tests=related_tests,
             uncertainty_notes=tuple(uncertainty_notes),
         )
 
     def _read_source(self, root: Path, relative_path: Path) -> tuple[str | None, str | None]:
         resolved_root = root.resolve()
-        source_path = (resolved_root / relative_path).resolve()
+        try:
+            source_path = (resolved_root / relative_path).resolve()
+        except (OSError, RuntimeError):
+            return None, f"Could not resolve source file {self._format_path(relative_path)}."
         if not source_path.is_relative_to(resolved_root):
             return (
                 None,
@@ -153,7 +217,7 @@ class ChangeModelBuilder:
                     CodeReference(
                         changed_file.path,
                         "import",
-                        f"{module}.{alias.name}" if module else alias.name,
+                        ChangeModelBuilder._python_import_name(module, alias.name),
                         node.lineno,
                     )
                     for alias in node.names
@@ -166,11 +230,159 @@ class ChangeModelBuilder:
         return tuple(symbols), tuple(imports), tuple(calls)
 
     @staticmethod
+    def _analyze_javascript(
+        changed_file: ChangedFile,
+        source: str,
+    ) -> tuple[tuple[ChangedSymbol, ...], tuple[CodeReference, ...], tuple[CodeReference, ...]]:
+        added_lines = ChangeModelBuilder._added_line_numbers(changed_file.hunks)
+        symbols: list[ChangedSymbol] = []
+        imports: list[CodeReference] = []
+        calls: list[CodeReference] = []
+
+        for line_number, line in enumerate(source.split("\n"), start=1):
+            import_match = _JS_IMPORT_FROM.match(line) or _JS_IMPORT_SIDE_EFFECT.match(line)
+            if import_match is not None:
+                imports.append(
+                    CodeReference(changed_file.path, "import", import_match.group(1), line_number)
+                )
+            for require_match in _JS_REQUIRE.finditer(line):
+                imports.append(
+                    CodeReference(
+                        changed_file.path,
+                        "import",
+                        require_match.group(1),
+                        line_number,
+                    )
+                )
+
+            if line_number not in added_lines:
+                continue
+            function_match = _JS_FUNCTION.match(line)
+            class_match = _JS_CLASS.match(line)
+            arrow_match = _JS_ARROW.match(line)
+            export_match = _JS_EXPORT.match(line)
+            method_match = _JS_METHOD.match(line)
+            declared_name: str | None = None
+            if function_match is not None:
+                kind = "async function" if function_match.group(1) else "function"
+                declared_name = function_match.group(2)
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        function_match.group(2),
+                        kind,
+                        line_number,
+                    )
+                )
+            elif class_match is not None:
+                declared_name = class_match.group(1)
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        class_match.group(1),
+                        "class",
+                        line_number,
+                    )
+                )
+            elif arrow_match is not None:
+                kind = "async function" if arrow_match.group(2) else "function"
+                declared_name = arrow_match.group(1)
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        arrow_match.group(1),
+                        kind,
+                        line_number,
+                    )
+                )
+            elif export_match is not None:
+                declared_name = export_match.group(1)
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        export_match.group(1),
+                        "export",
+                        line_number,
+                    )
+                )
+            elif method_match is not None and method_match.group("name") not in _NON_CALL_PREFIXES:
+                modifiers = method_match.group("modifiers").split()
+                kind = "async method" if "async" in modifiers else "method"
+                declared_name = method_match.group("name")
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        declared_name,
+                        kind,
+                        line_number,
+                    )
+                )
+
+            for call_match in _JS_CALL.finditer(line):
+                call_name = call_match.group(1)
+                prefix = line[: call_match.start()].rstrip().split()
+                if (
+                    call_name == declared_name
+                    or call_name in _NON_CALL_PREFIXES
+                    or (prefix and prefix[-1] in _NON_CALL_PREFIXES)
+                ):
+                    continue
+                calls.append(
+                    CodeReference(
+                        changed_file.path,
+                        "call",
+                        call_name,
+                        line_number,
+                    )
+                )
+
+        if not symbols:
+            symbols.extend(ChangeModelBuilder._symbols_from_hunk_context(changed_file))
+        return tuple(symbols), tuple(imports), tuple(calls)
+
+    @staticmethod
+    def _symbols_from_hunk_context(changed_file: ChangedFile) -> tuple[ChangedSymbol, ...]:
+        symbols: list[ChangedSymbol] = []
+        for hunk in changed_file.hunks:
+            header_parts = hunk.header.split("@@", 2)
+            if len(header_parts) < 3:
+                continue
+            context = header_parts[2].strip()
+            python_match = _PYTHON_HUNK_SYMBOL.match(context)
+            if python_match is not None:
+                kind = "class" if python_match.group(2) == "class" else "function"
+                if python_match.group(1):
+                    kind = "async function"
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        python_match.group(3),
+                        kind,
+                        hunk.new_start,
+                    )
+                )
+                continue
+            function_match = _JS_FUNCTION.match(context)
+            if function_match is not None:
+                kind = "async function" if function_match.group(1) else "function"
+                symbols.append(
+                    ChangedSymbol(
+                        changed_file.path,
+                        function_match.group(2),
+                        kind,
+                        hunk.new_start,
+                    )
+                )
+        return tuple(symbols)
+
+    @staticmethod
     def _added_line_numbers(hunks: tuple[DiffHunk, ...]) -> frozenset[int]:
         added_lines: set[int] = set()
         for hunk in hunks:
             new_line = hunk.new_start or 0
             for line in hunk.patch.split("\n")[1:]:
+                if not line:
+                    continue
                 if line.startswith("+"):
                     added_lines.add(new_line)
                     new_line += 1
@@ -188,8 +400,51 @@ class ChangeModelBuilder:
         return None
 
     @staticmethod
+    def _python_import_name(module: str, imported_name: str) -> str:
+        if not module:
+            return imported_name
+        separator = "" if module.endswith(".") else "."
+        return f"{module}{separator}{imported_name}"
+
+    @staticmethod
     def _format_path(path: Path) -> str:
         return json.dumps(str(path), ensure_ascii=True)
+
+    @staticmethod
+    def _format_path_summary(paths: list[Path]) -> str:
+        shown_paths = paths[:5]
+        summary = ", ".join(ChangeModelBuilder._format_path(path) for path in shown_paths)
+        remaining = len(paths) - len(shown_paths)
+        if remaining:
+            summary += f", and {remaining:,} more"
+        return summary
+
+    def _limit_evidence(
+        self,
+        symbols: tuple[ChangedSymbol, ...],
+        imports: tuple[CodeReference, ...],
+        calls: tuple[CodeReference, ...],
+    ) -> tuple[
+        tuple[ChangedSymbol, ...],
+        tuple[CodeReference, ...],
+        tuple[CodeReference, ...],
+        int,
+    ]:
+        remaining = self.max_evidence_per_file
+        kept_symbols = symbols[:remaining]
+        remaining -= len(kept_symbols)
+        kept_calls = calls[:remaining]
+        remaining -= len(kept_calls)
+        kept_imports = imports[:remaining]
+        omitted = (
+            len(symbols)
+            + len(imports)
+            + len(calls)
+            - len(kept_symbols)
+            - len(kept_imports)
+            - len(kept_calls)
+        )
+        return kept_symbols, kept_imports, kept_calls, omitted
 
     @staticmethod
     def _classify_file(changed_file: ChangedFile) -> ChangedFile:

@@ -173,3 +173,268 @@ def test_extracts_python_symbols_imports_and_calls_from_added_lines(tmp_path: Pa
         ("requests.post", 9),
     ]
     assert context.uncertainty_notes == ()
+
+
+def test_formats_relative_python_imports_without_extra_separator(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "module.py"
+    source_path.parent.mkdir()
+    source_path.write_text("from . import helper\n")
+    hunk = DiffHunk(
+        file_path=Path("src/module.py"),
+        header="@@ -0,0 +1 @@",
+        new_start=1,
+        new_lines=1,
+        patch="@@ -0,0 +1 @@\n+from . import helper\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("src/module.py"), status=FileStatus.ADDED, hunks=(hunk,)),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/import")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [reference.name for reference in context.nearby_imports] == [".helper"]
+
+
+def test_extracts_typescript_evidence_with_heuristic_uncertainty(tmp_path: Path) -> None:
+    source_path = tmp_path / "web" / "payments.ts"
+    source_path.parent.mkdir()
+    source_path.write_text(
+        "import { processor } from './processor';\n"
+        "import { audit } from './audit';\n"
+        "export async function createPayment(amount: number) {\n"
+        "  const result = await processor.charge(amount);\n"
+        "  audit.record(result);\n"
+        "  if (result) {\n"
+        "    return result;\n"
+        "  }\n"
+        "}\n"
+    )
+    patch_lines = (
+        "+import { processor } from './processor';\n"
+        "+import { audit } from './audit';\n"
+        "+export async function createPayment(amount: number) {\n"
+        "+  const result = await processor.charge(amount);\n"
+        "+  audit.record(result);\n"
+        "+  if (result) {\n"
+        "+    return result;\n"
+        "+  }\n"
+        "+}\n"
+    )
+    hunk = DiffHunk(
+        file_path=Path("web/payments.ts"),
+        header="@@ -0,0 +1,9 @@",
+        old_start=0,
+        old_lines=0,
+        new_start=1,
+        new_lines=9,
+        patch="@@ -0,0 +1,9 @@\n" + patch_lines,
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("web/payments.ts"),
+                status=FileStatus.ADDED,
+                hunks=(hunk,),
+            ),
+        ),
+        diff_hunks=(hunk,),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/payments")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
+        ("createPayment", "async function")
+    ]
+    assert [reference.name for reference in context.nearby_imports] == [
+        "./processor",
+        "./audit",
+    ]
+    assert [reference.name for reference in context.call_sites] == [
+        "processor.charge",
+        "audit.record",
+    ]
+    assert any(
+        "heuristic" in note and '"web/payments.ts"' in note for note in context.uncertainty_notes
+    )
+
+
+def test_distinguishes_typescript_methods_from_calls(tmp_path: Path) -> None:
+    source_path = tmp_path / "web" / "payment-service.ts"
+    source_path.parent.mkdir()
+    source_path.write_text(
+        "export class PaymentService {\n"
+        "  async charge(amount: number) {\n"
+        "    return processor.charge(amount);\n"
+        "  }\n"
+        "}\n"
+    )
+    hunk = DiffHunk(
+        file_path=Path("web/payment-service.ts"),
+        header="@@ -0,0 +1,5 @@",
+        new_start=1,
+        new_lines=5,
+        patch=(
+            "@@ -0,0 +1,5 @@\n"
+            "+export class PaymentService {\n"
+            "+  async charge(amount: number) {\n"
+            "+    return processor.charge(amount);\n"
+            "+  }\n"
+            "+}\n"
+        ),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("web/payment-service.ts"),
+                status=FileStatus.ADDED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/service")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
+        ("PaymentService", "class"),
+        ("charge", "async method"),
+    ]
+    assert [reference.name for reference in context.call_sites] == ["processor.charge"]
+
+
+def test_uses_hunk_context_when_python_source_is_invalid(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "broken.py"
+    source_path.parent.mkdir()
+    source_path.write_text("def broken(:\n    pass\n")
+    hunk = DiffHunk(
+        file_path=Path("src/broken.py"),
+        header="@@ -1,2 +1,2 @@ def broken(value):",
+        old_start=1,
+        old_lines=2,
+        new_start=1,
+        new_lines=2,
+        patch="@@ -1,2 +1,2 @@ def broken(value):\n-def broken():\n+def broken(:\n     pass\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("src/broken.py"),
+                status=FileStatus.MODIFIED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/broken")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
+        ("broken", "function")
+    ]
+    assert any("Could not parse" in note for note in context.uncertainty_notes)
+
+
+def test_bounds_source_reads_and_reports_unsupported_languages(tmp_path: Path) -> None:
+    large_path = tmp_path / "src" / "large.py"
+    large_path.parent.mkdir()
+    large_path.write_text("VALUE = '" + "x" * 100 + "'\n")
+    go_path = tmp_path / "src" / "service.go"
+    go_path.write_text("package service\n")
+    hunk = DiffHunk(
+        file_path=Path("src/service.go"),
+        header="@@ -0,0 +1 @@",
+        new_start=1,
+        new_lines=1,
+        patch="@@ -0,0 +1 @@\n+package service\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("src/large.py"), status=FileStatus.ADDED),
+            ChangedFile(
+                path=Path("src/service.go"),
+                status=FileStatus.ADDED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/bounds")
+
+    context = ChangeModelBuilder(max_source_bytes=32).build(repository, "main", diff)
+
+    assert context.changed_symbols == ()
+    assert any(
+        '"src/large.py"' in note and "exceeds 32 bytes" in note
+        for note in context.uncertainty_notes
+    )
+    assert any(
+        '"src/service.go"' in note and "not available" in note for note in context.uncertainty_notes
+    )
+
+
+def test_does_not_follow_source_paths_outside_repository(tmp_path: Path) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    outside_source = tmp_path / "outside.py"
+    outside_source.write_text("def private_symbol():\n    return 'private'\n")
+    (repository_root / "linked.py").symlink_to(outside_source)
+    hunk = DiffHunk(
+        file_path=Path("linked.py"),
+        header="@@ -0,0 +1,2 @@ def tracked_symbol():",
+        new_start=1,
+        new_lines=2,
+        patch=(
+            "@@ -0,0 +1,2 @@ def tracked_symbol():\n"
+            "+def tracked_symbol():\n"
+            "+    return 'diff evidence'\n"
+        ),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("linked.py"), status=FileStatus.ADDED, hunks=(hunk,)),
+        ),
+    )
+    repository = RepositoryContext(root=repository_root, current_branch="feature/symlink")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [symbol.name for symbol in context.changed_symbols] == ["tracked_symbol"]
+    assert any("outside the repository" in note for note in context.uncertainty_notes)
+
+
+def test_caps_retained_evidence_per_file(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "imports.py"
+    source_path.parent.mkdir()
+    source_path.write_text("import alpha\nimport beta\nimport gamma\n")
+    hunk = DiffHunk(
+        file_path=Path("src/imports.py"),
+        header="@@ -0,0 +1,3 @@",
+        new_start=1,
+        new_lines=3,
+        patch="@@ -0,0 +1,3 @@\n+import alpha\n+import beta\n+import gamma\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(
+                path=Path("src/imports.py"),
+                status=FileStatus.ADDED,
+                hunks=(hunk,),
+            ),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/imports")
+
+    context = ChangeModelBuilder(max_evidence_per_file=2).build(repository, "main", diff)
+
+    assert [reference.name for reference in context.nearby_imports] == ["alpha", "beta"]
+    assert any("Omitted 1 evidence item" in note for note in context.uncertainty_notes)
