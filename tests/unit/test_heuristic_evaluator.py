@@ -280,6 +280,22 @@ def test_unrelated_negation_does_not_hide_rollback_misconception() -> None:
     assert assessment.label is AssessmentLabel.GAP_FOUND
 
 
+def test_negation_before_an_unrelated_verb_does_not_negate_rollback_claim() -> None:
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        failure_question(),
+        Answer(
+            question_id="failure",
+            raw_text=(
+                "database.transaction rollback never fails and undoes processor.charge; "
+                "retry is needed."
+            ),
+        ),
+    )
+
+    assert assessment.label is AssessmentLabel.GAP_FOUND
+
+
 @pytest.mark.parametrize(
     "rollback_explanation",
     (
