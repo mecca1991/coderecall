@@ -7,9 +7,14 @@ from pathlib import Path
 
 import typer
 
-from coderecall.analysis import FileFilter
+from coderecall.analysis import (
+    ChangeModelBuilder,
+    DiffSummaryService,
+    FileFilter,
+    SideEffectDetector,
+)
 from coderecall.core.errors import CodeRecallError
-from coderecall.core.types import ChangedFile, FileStatus, FilteredFile
+from coderecall.core.types import ChangedFile, DiffSummary, FileStatus, FilteredFile
 from coderecall.git import DiffCollector, GitAdapter
 
 
@@ -40,6 +45,34 @@ def _format_filtered_file(filtered_file: FilteredFile) -> str:
 
 def _format_path(path: Path) -> str:
     return json.dumps(str(path), ensure_ascii=True)
+
+
+def _render_diff_summary(summary: DiffSummary) -> tuple[str, ...]:
+    lines = ["Diff summary", f"Purpose: {summary.purpose}"]
+    if summary.relevant_files:
+        lines.append("Relevant files:")
+        lines.extend(f"  - {_format_path(path)}" for path in summary.relevant_files)
+    if summary.tests:
+        lines.append("Tests found:")
+        lines.extend(f"  - {_format_path(path)}" for path in summary.tests[:5])
+        if len(summary.tests) > 5:
+            lines.append(f"  - and {len(summary.tests) - 5} more")
+    if summary.side_effects:
+        lines.append("Likely side effects:")
+        for side_effect in summary.side_effects:
+            evidence_paths = tuple(
+                dict.fromkeys(citation.file_path for citation in side_effect.evidence)
+            )
+            evidence = ", ".join(_format_path(path) for path in evidence_paths[:3])
+            lines.append(
+                f"  - {side_effect.kind.value}: {side_effect.description} Evidence: {evidence}"
+            )
+    if summary.uncertainty_notes:
+        lines.append("Uncertainty:")
+        lines.extend(f"  - {note}" for note in summary.uncertainty_notes[:3])
+        if len(summary.uncertainty_notes) > 3:
+            lines.append(f"  - and {len(summary.uncertainty_notes) - 3} more notes")
+    return tuple(lines)
 
 
 def review_command(
@@ -89,6 +122,10 @@ def review_command(
     except CodeRecallError as error:
         _exit_with_error(error)
 
+    context = ChangeModelBuilder(source_reader=git).build(repository, selected_base, diff)
+    context = SideEffectDetector().detect(context)
+    summary = DiffSummaryService().summarize(context)
+
     typer.echo("CodeRecall review context")
     typer.echo(f"Repository root: {_format_path(repository.root)}")
     typer.echo(f"Current branch: {repository.current_branch}")
@@ -101,8 +138,11 @@ def review_command(
     typer.echo(f"Filtered files: {len(diff.filtered_files)}")
     for filtered_file in diff.filtered_files:
         typer.echo(_format_filtered_file(filtered_file))
-    for note in diff.uncertainty_notes:
-        typer.echo(f"Note: {note}")
+    for line in _render_diff_summary(summary):
+        typer.echo(line)
+    if not diff.changed_files:
+        typer.echo("Review stopped: no meaningful files remain after filtering.")
+        return
     typer.echo(f"Report path: {report}")
     typer.echo(f"Questions: {questions}")
     typer.echo(f"Follow-up enabled: {not no_follow_up}")

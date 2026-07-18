@@ -6,7 +6,8 @@ It analyzes the current Git branch, asks a few targeted questions about the chan
 
 ## Status
 
-CodeRecall is in early project setup. The Python CLI scaffold is available, but the full review workflow is still under active development.
+CodeRecall is in early development. The Python CLI can inspect a branch and render a local,
+evidence-based diff summary, while the question and report stages are still under development.
 
 ## Intended Usage
 
@@ -16,7 +17,9 @@ The main workflow is:
 coderecall review --base main
 ```
 
-Git repository detection, base selection, change collection, and low-signal file filtering are available. Question generation and reporting are still under development.
+Git repository detection, base selection, change collection, low-signal file filtering, lightweight
+change modeling, likely side-effect detection, and concise diff summaries are available. Question
+generation and reporting are still under development.
 
 By default, `review` compares commits on the current branch with their merge base on the selected branch. To also include staged and unstaged changes to tracked files, run:
 
@@ -24,13 +27,13 @@ By default, `review` compares commits on the current branch with their merge bas
 coderecall review --base main --include-uncommitted
 ```
 
-Untracked files are excluded until they are added to Git. The command will eventually:
+Untracked files are excluded until they are added to Git. The command currently summarizes the
+meaningful files, changed symbols, related tests, likely side effects, and analysis uncertainty. The
+complete workflow will eventually continue by:
 
-1. Compare the current branch against a base branch.
-2. Summarize the meaningful code changes.
-3. Ask open-ended questions about behavior, failure modes, and evidence.
-4. Evaluate answers against repository evidence.
-5. Write a local Markdown report.
+1. Asking open-ended questions about behavior, failure modes, and evidence.
+2. Evaluating answers against repository evidence.
+3. Writing a local Markdown report.
 
 The review context excludes generated output, vendored dependencies, lockfiles, and minified assets from analysis by default. Filtered paths remain visible in the command output with the reason they were excluded.
 
