@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -109,8 +108,6 @@ def review_command(
     )
     all_answers = list(answers)
     if follow_up is not None:
-        follow_up_answer = terminal.capture_follow_up(follow_up.question)
-        follow_up = replace(follow_up, answer=follow_up_answer)
-        all_answers.append(follow_up_answer)
+        all_answers.append(terminal.capture_follow_up(follow_up.question))
 
     terminal.render_answer_counts(all_answers)
