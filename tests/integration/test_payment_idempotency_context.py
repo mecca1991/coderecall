@@ -5,7 +5,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from coderecall.analysis import ChangeModelBuilder, FileFilter, SideEffectDetector
+import pytest
+from typer.testing import CliRunner
+
+from coderecall.analysis import (
+    ChangeModelBuilder,
+    DiffSummaryService,
+    FileFilter,
+    SideEffectDetector,
+)
+from coderecall.cli.app import app
 from coderecall.core.types import SideEffectKind
 from coderecall.git import DiffCollector, GitAdapter
 
@@ -32,7 +41,10 @@ def commit_all(directory: Path, message: str) -> None:
     run_git(directory, "commit", "--quiet", "-m", message)
 
 
-def test_detects_payment_processor_and_local_transaction_boundaries(tmp_path: Path) -> None:
+def test_detects_payment_processor_and_local_transaction_boundaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     run_git(tmp_path, "init", "--quiet")
     run_git(tmp_path, "checkout", "--quiet", "-b", "main")
     run_git(tmp_path, "config", "user.name", "CodeRecall Tests")
@@ -80,3 +92,35 @@ def test_detects_payment_processor_and_local_transaction_boundaries(tmp_path: Pa
     assert network_effect.evidence != transaction_effect.evidence
     assert "external operations may not share" in transaction_effect.description
     assert detected.related_tests == (Path("tests/payment_handler.test.ts"),)
+
+    summary = DiffSummaryService().summarize(detected)
+
+    assert summary.relevant_files == (
+        Path("src/payment_service.ts"),
+        Path("src/payment_handler.ts"),
+        Path("tests/payment_handler.test.ts"),
+    )
+    assert summary.tests == (Path("tests/payment_handler.test.ts"),)
+    assert {effect.kind for effect in summary.side_effects} >= {
+        SideEffectKind.NETWORK_CALL,
+        SideEffectKind.TRANSACTION_BOUNDARY,
+    }
+    assert summary.purpose.startswith("Likely updates `handlePayment`")
+    assert "network call" in summary.purpose
+    assert "transaction boundary" in summary.purpose
+
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["review", "--base", "main", "--plain"])
+
+    assert result.exit_code == 0
+    assert "Diff summary" in result.output
+    assert '  - "src/payment_handler.ts"' in result.output
+    assert '  - "src/payment_service.ts"' in result.output
+    assert "Tests found:" in result.output
+    assert '  - "tests/payment_handler.test.ts"' in result.output
+    assert "Likely side effects:" in result.output
+    assert "network call:" in result.output
+    assert "transaction boundary:" in result.output
+    assert result.output.index("Diff summary") < result.output.index(
+        "Question and report generation are not implemented yet."
+    )
