@@ -189,6 +189,35 @@ def test_partial_answer_keeps_repository_evidence_and_names_missing_reasoning() 
     assert any("concrete" in gap.lower() for gap in assessment.gaps)
 
 
+def test_generic_path_token_cannot_satisfy_failure_evidence_groups() -> None:
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        failure_question(),
+        Answer(question_id="failure", raw_text="src retry"),
+    )
+
+    assert assessment.label is AssessmentLabel.UNCERTAIN
+
+
+def test_secondary_symbol_cannot_stand_in_for_the_primary_behavior_area() -> None:
+    question = Question(
+        id="behavior",
+        category=QuestionCategory.BEHAVIOR,
+        prompt="What behavior does handlePayment modify?",
+        rationale="The handler changed.",
+        references=(HANDLER_CITATION,),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(question_id="behavior", raw_text="capturePayment changes the flow."),
+    )
+
+    assert assessment.label is AssessmentLabel.PARTIAL
+    assert any("handlePayment" in gap for gap in assessment.gaps)
+
+
 def test_explicit_local_rollback_misconception_is_a_gap() -> None:
     assessment = HeuristicEvaluator().evaluate(
         payment_context(),

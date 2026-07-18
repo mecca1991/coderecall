@@ -423,18 +423,23 @@ class HeuristicEvaluator:
                     HeuristicEvaluator._normalize(Path(path_name).stem),
                 )
             )
-        for segment in re.split(r"[./\\]", value):
-            words = HeuristicEvaluator._normalize(segment).split()
-            if not words:
-                continue
+        else:
+            terminal = value.rsplit(".", maxsplit=1)[-1]
+            words = HeuristicEvaluator._normalize(terminal).split()
             phrases.append(" ".join(words))
             while words and words[0] in _LEADING_WORDS:
                 words.pop(0)
             if words[:1] == ["by"]:
                 words.pop(0)
-            if len(words) > 1 or (words and len(words[0]) >= 5 and words[0] not in _GENERIC_WORDS):
+            if len(words) > 1:
                 phrases.append(" ".join(words))
-        return tuple(dict.fromkeys(filter(None, phrases)))
+        return tuple(
+            dict.fromkeys(
+                phrase
+                for phrase in phrases
+                if len(phrase.split()) > 1 or (len(phrase) >= 5 and phrase not in _GENERIC_WORDS)
+            )
+        )
 
     @staticmethod
     def _normalize(value: str) -> str:
