@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import ast
 import io
-import re
 import tokenize
 from dataclasses import replace
 from pathlib import Path
@@ -88,9 +88,6 @@ _DESCRIPTIONS = {
         "The changed code likely publishes or enqueues a message or job."
     ),
 }
-_PYTHON_OPEN_MODE = re.compile(
-    r"\bopen\s*\([^)]*(?:,\s*|mode\s*=\s*)(?P<quote>['\"])(?P<mode>[^'\"]+)(?P=quote)"
-)
 _MAX_PATCH_CALL_LINES = 20
 _MAX_PATCH_CALL_CHARS = 4_096
 
@@ -287,14 +284,17 @@ class SideEffectDetector:
         )
         if language != "python":
             return False
-        call_text = SideEffectDetector._patch_call_at_new_number(hunk, reference.line_start)
-        if call_text is None:
+        call_expression = SideEffectDetector._patch_open_call_at_new_number(
+            hunk,
+            reference.line_start,
+        )
+        if call_expression is None:
             return False
-        match = _PYTHON_OPEN_MODE.search(call_text)
-        return match is not None and any(flag in match.group("mode") for flag in "wax+")
+        mode = SideEffectDetector._python_open_mode(call_expression)
+        return mode is not None and any(flag in mode for flag in "wax+")
 
     @staticmethod
-    def _patch_call_at_new_number(hunk: DiffHunk, target_line: int) -> str | None:
+    def _patch_open_call_at_new_number(hunk: DiffHunk, target_line: int) -> str | None:
         new_line = hunk.new_start or 0
         call_lines: list[str] = []
         call_chars = 0
@@ -316,23 +316,24 @@ class SideEffectDetector:
                 call_lines.append(line)
                 call_chars += added_chars
                 call_text = "\n".join(call_lines)
-                if SideEffectDetector._python_call_is_complete(call_text):
-                    return call_text
+                call_expression = SideEffectDetector._python_open_call_expression(call_text)
+                if call_expression is not None:
+                    return call_expression
 
             new_line += 1
 
-        return "\n".join(call_lines) if call_lines else None
+        return None
 
     @staticmethod
-    def _python_call_is_complete(source: str) -> bool:
-        saw_open = False
+    def _python_open_call_expression(source: str) -> str | None:
+        open_start: tuple[int, int] | None = None
         depth = 0
         try:
             tokens = tokenize.generate_tokens(io.StringIO(source).readline)
             for token in tokens:
-                if not saw_open:
+                if open_start is None:
                     if token.type == tokenize.NAME and token.string == "open":
-                        saw_open = True
+                        open_start = token.start
                     continue
                 if token.type != tokenize.OP:
                     continue
@@ -341,10 +342,44 @@ class SideEffectDetector:
                 elif token.string == ")" and depth:
                     depth -= 1
                     if depth == 0:
-                        return True
+                        return SideEffectDetector._source_range(source, open_start, token.end)
         except (IndentationError, tokenize.TokenError):
-            return False
-        return False
+            return None
+        return None
+
+    @staticmethod
+    def _source_range(
+        source: str,
+        start: tuple[int, int],
+        end: tuple[int, int],
+    ) -> str:
+        lines = source.split("\n")
+        start_line, start_column = start
+        end_line, end_column = end
+        if start_line == end_line:
+            return lines[start_line - 1][start_column:end_column]
+        selected = [lines[start_line - 1][start_column:]]
+        selected.extend(lines[start_line : end_line - 1])
+        selected.append(lines[end_line - 1][:end_column])
+        return "\n".join(selected)
+
+    @staticmethod
+    def _python_open_mode(call_expression: str) -> str | None:
+        try:
+            expression = ast.parse(call_expression, mode="eval").body
+        except (SyntaxError, UnicodeError):
+            return None
+        if not isinstance(expression, ast.Call):
+            return None
+
+        mode_node: ast.expr | None = expression.args[1] if len(expression.args) > 1 else None
+        for keyword in expression.keywords:
+            if keyword.arg == "mode":
+                mode_node = keyword.value
+                break
+        if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+            return mode_node.value
+        return None
 
     @staticmethod
     def _find_hunk(

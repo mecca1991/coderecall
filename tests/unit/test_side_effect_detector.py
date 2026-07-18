@@ -60,7 +60,7 @@ def test_detects_python_open_only_with_a_write_mode() -> None:
         header="@@ -1 +1 @@ def export():",
         new_start=1,
         new_lines=1,
-        patch='@@ -1 +1 @@ def export():\n+    with open(path, "w") as output:\n',
+        patch=('@@ -1 +1 @@ def export():\n+    with open(get_path("data"), "w") as output:\n'),
     )
     read_hunk = DiffHunk(
         file_path=Path("reader.py"),
