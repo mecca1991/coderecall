@@ -16,7 +16,10 @@ from coderecall.core.types import (
 )
 
 
-def test_builds_context_without_losing_diff_evidence() -> None:
+def test_builds_context_without_losing_diff_evidence(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "payments.py"
+    source_path.parent.mkdir()
+    source_path.write_text("ENABLED = True\n")
     hunk = DiffHunk(
         file_path=Path("src/payments.py"),
         header="@@ -1,2 +1,2 @@",
@@ -45,13 +48,13 @@ def test_builds_context_without_losing_diff_evidence() -> None:
         uncertainty_notes=("An oversized file was skipped.",),
     )
     repository = RepositoryContext(
-        root=Path("/repo"),
+        root=tmp_path,
         current_branch="feature/payment-idempotency",
     )
 
     context = ChangeModelBuilder().build(repository, "main", diff)
 
-    assert context.repo_root == Path("/repo")
+    assert context.repo_root == tmp_path
     assert context.current_branch == "feature/payment-idempotency"
     assert context.base_branch == "main"
     assert context.merge_base == "abc123"
@@ -112,3 +115,61 @@ def test_recognizes_test_filename_conventions_without_substring_matches() -> Non
         Path("web/checkout.spec.js"),
         Path("web/checkout.test.mjs"),
     )
+
+
+def test_extracts_python_symbols_imports_and_calls_from_added_lines(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "payments.py"
+    source_path.parent.mkdir()
+    source_path.write_text(
+        "import requests\n"
+        "from payments.gateway import charge\n"
+        "\n"
+        "def unchanged():\n"
+        "    return 1\n"
+        "\n"
+        "async def create_payment(amount):\n"
+        "    response = charge(amount)\n"
+        "    requests.post('/audit', json=response)\n"
+        "    return response\n"
+    )
+    hunk = DiffHunk(
+        file_path=Path("src/payments.py"),
+        header="@@ -7,2 +7,4 @@ async def create_payment(amount):",
+        old_start=7,
+        old_lines=2,
+        new_start=7,
+        new_lines=4,
+        patch=(
+            "@@ -7,2 +7,4 @@ async def create_payment(amount):\n"
+            " async def create_payment(amount):\n"
+            "+    response = charge(amount)\n"
+            "+    requests.post('/audit', json=response)\n"
+            "     return response\n"
+        ),
+    )
+    changed_file = ChangedFile(
+        path=Path("src/payments.py"),
+        status=FileStatus.MODIFIED,
+        hunks=(hunk,),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(changed_file,),
+        diff_hunks=(hunk,),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/payments")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [
+        (symbol.name, symbol.kind, symbol.line_start) for symbol in context.changed_symbols
+    ] == [("create_payment", "async function", 7)]
+    assert [(reference.name, reference.line_start) for reference in context.nearby_imports] == [
+        ("requests", 1),
+        ("payments.gateway.charge", 2),
+    ]
+    assert [(reference.name, reference.line_start) for reference in context.call_sites] == [
+        ("charge", 8),
+        ("requests.post", 9),
+    ]
+    assert context.uncertainty_notes == ()
