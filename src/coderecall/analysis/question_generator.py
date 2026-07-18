@@ -83,24 +83,14 @@ class QuestionGenerator:
         primary_reference: EvidenceCitation,
         valid_effects: tuple[tuple[LikelySideEffect, tuple[EvidenceCitation, ...]], ...],
     ) -> Question:
-        transaction = next(
-            (item for item in valid_effects if item[0].kind is SideEffectKind.TRANSACTION_BOUNDARY),
-            None,
-        )
-        external = next(
+        partial_success = self._partial_success_pair(valid_effects)
+        if partial_success is not None:
             (
-                item
-                for kind in _EXTERNAL_EFFECT_PRIORITY
-                for item in valid_effects
-                if item[0].kind is kind
-            ),
-            None,
-        )
-        if transaction is not None and external is not None:
-            external_effect, external_evidence = external
-            transaction_effect, transaction_evidence = transaction
-            external_reference = external_evidence[0]
-            transaction_reference = transaction_evidence[0]
+                external_effect,
+                external_reference,
+                transaction_effect,
+                transaction_reference,
+            ) = partial_success
             return Question(
                 id="failure",
                 category=QuestionCategory.FAILURE,
@@ -128,12 +118,12 @@ class QuestionGenerator:
                 prompt=(
                     f"The branch contains a likely {effect.kind.value} at "
                     f"{self._format_citation_area(effect_reference)}. What failure mode matters "
-                    f"most, and how does {area} handle it?"
+                    "most, and how should the changed flow account for it?"
                 ),
                 rationale=(
                     f"The changed code contains a repository-backed {effect.kind.value} signal."
                 ),
-                references=self._deduplicate_references((effect_reference, primary_reference)),
+                references=(effect_reference,),
             )
 
         return Question(
@@ -145,6 +135,51 @@ class QuestionGenerator:
             ),
             rationale=f"Reasoning about failure behavior is necessary for the change in {area}.",
             references=(primary_reference,),
+        )
+
+    @staticmethod
+    def _partial_success_pair(
+        valid_effects: tuple[tuple[LikelySideEffect, tuple[EvidenceCitation, ...]], ...],
+    ) -> (
+        tuple[
+            LikelySideEffect,
+            EvidenceCitation,
+            LikelySideEffect,
+            EvidenceCitation,
+        ]
+        | None
+    ):
+        transactions = tuple(
+            item for item in valid_effects if item[0].kind is SideEffectKind.TRANSACTION_BOUNDARY
+        )
+        for external_kind in _EXTERNAL_EFFECT_PRIORITY:
+            for external_effect, external_evidence in valid_effects:
+                if external_effect.kind is not external_kind:
+                    continue
+                for transaction_effect, transaction_evidence in transactions:
+                    for external_reference in external_evidence:
+                        for transaction_reference in transaction_evidence:
+                            if QuestionGenerator._same_change_area(
+                                external_reference,
+                                transaction_reference,
+                            ):
+                                return (
+                                    external_effect,
+                                    external_reference,
+                                    transaction_effect,
+                                    transaction_reference,
+                                )
+        return None
+
+    @staticmethod
+    def _same_change_area(
+        first: EvidenceCitation,
+        second: EvidenceCitation,
+    ) -> bool:
+        return (
+            first.file_path == second.file_path
+            and first.hunk_header is not None
+            and first.hunk_header == second.hunk_header
         )
 
     @staticmethod
@@ -228,9 +263,3 @@ class QuestionGenerator:
         if citation.symbol is None:
             return formatted_path
         return f"`{citation.symbol}` in {formatted_path}"
-
-    @staticmethod
-    def _deduplicate_references(
-        references: tuple[EvidenceCitation, ...],
-    ) -> tuple[EvidenceCitation, ...]:
-        return tuple(dict.fromkeys(references))

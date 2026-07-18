@@ -68,12 +68,14 @@ def test_failure_question_connects_external_effect_and_transaction_boundary() ->
         kind="call",
         file_path=service_path,
         symbol="processor.charge",
+        hunk_header="@@ -4,3 +4,8 @@ capturePayment",
         line_start=7,
     )
     transaction_citation = EvidenceCitation(
         kind="call",
         file_path=service_path,
         symbol="database.transaction",
+        hunk_header="@@ -4,3 +4,8 @@ capturePayment",
         line_start=6,
     )
     context = ChangeContext(
@@ -119,6 +121,62 @@ def test_failure_question_connects_external_effect_and_transaction_boundary() ->
     assert "retry or recovery" in failure.prompt
     assert "partial success" in failure.rationale
     assert failure.references == (network_citation, transaction_citation)
+
+
+def test_does_not_pair_side_effects_from_unrelated_changed_files() -> None:
+    client_path = Path("src/client.py")
+    worker_path = Path("src/worker.py")
+    network_citation = EvidenceCitation(
+        kind="call",
+        file_path=client_path,
+        symbol="client.post",
+        hunk_header="@@ -2,3 +2,4 @@ send_event",
+        line_start=4,
+    )
+    transaction_citation = EvidenceCitation(
+        kind="call",
+        file_path=worker_path,
+        symbol="session.begin",
+        hunk_header="@@ -8,3 +8,5 @@ process_job",
+        line_start=10,
+    )
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/unrelated-effects",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(path=client_path, status=FileStatus.MODIFIED),
+            ChangedFile(path=worker_path, status=FileStatus.MODIFIED),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=worker_path,
+                name="process_job",
+                kind="function",
+                line_start=8,
+            ),
+        ),
+        likely_side_effects=(
+            LikelySideEffect(
+                kind=SideEffectKind.NETWORK_CALL,
+                description="The change likely makes an external call.",
+                evidence=(network_citation,),
+            ),
+            LikelySideEffect(
+                kind=SideEffectKind.TRANSACTION_BOUNDARY,
+                description="The change likely creates a transaction boundary.",
+                evidence=(transaction_citation,),
+            ),
+        ),
+    )
+
+    failure = QuestionGenerator().generate(context)[1]
+
+    assert "succeeds but" not in failure.prompt
+    assert "partial success" not in failure.rationale
+    assert "`process_job`" not in failure.prompt
+    assert "likely network call" in failure.prompt
+    assert failure.references == (network_citation,)
 
 
 def test_evidence_question_names_a_changed_test_and_ignores_other_paths() -> None:
