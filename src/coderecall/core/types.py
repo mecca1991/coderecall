@@ -121,6 +121,26 @@ class EvidenceCitation:
 
 
 @dataclass(frozen=True)
+class ChangedSymbol:
+    """A declaration affected by one or more changed lines."""
+
+    file_path: Path
+    name: str
+    kind: str
+    line_start: int | None = None
+
+
+@dataclass(frozen=True)
+class CodeReference:
+    """An import or call visible near the changed code."""
+
+    file_path: Path
+    kind: str
+    name: str
+    line_start: int | None = None
+
+
+@dataclass(frozen=True)
 class ChangeContext:
     """The repository change being reviewed."""
 
@@ -131,7 +151,9 @@ class ChangeContext:
     changed_files: tuple[ChangedFile, ...] = ()
     filtered_files: tuple[FilteredFile, ...] = ()
     diff_hunks: tuple[DiffHunk, ...] = ()
-    changed_symbols: tuple[str, ...] = ()
+    changed_symbols: tuple[ChangedSymbol, ...] = ()
+    nearby_imports: tuple[CodeReference, ...] = ()
+    call_sites: tuple[CodeReference, ...] = ()
     related_tests: tuple[Path, ...] = ()
     likely_side_effects: tuple[str, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
