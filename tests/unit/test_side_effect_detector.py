@@ -166,6 +166,7 @@ def test_requires_recognized_receivers_for_ambiguous_method_names() -> None:
             CodeReference(Path("config.py"), "call", "config.update", 1),
             CodeReference(Path("response.py"), "call", "response.write", 2),
             CodeReference(Path("release.py"), "call", "git.commit", 3),
+            CodeReference(Path("items.py"), "call", "items.insert", 4),
         ),
     )
 

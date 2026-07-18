@@ -26,12 +26,11 @@ _DATABASE_CALLS = frozenset(
         "bulk_update",
         "bulkcreate",
         "bulkupdate",
-        "insert",
         "upsert",
     }
 )
 _OWNER_SCOPED_DATABASE_CALLS = frozenset(
-    {"add", "create", "delete", "execute", "flush", "save", "update"}
+    {"add", "create", "delete", "execute", "flush", "insert", "save", "update"}
 )
 _DATABASE_OWNERS = frozenset(
     {
