@@ -162,6 +162,7 @@ class HeuristicEvaluator:
             label = AssessmentLabel.PARTIAL
             gaps = ("Connect the response explicitly to each cited changed-file detail.",)
 
+        evidence = self._extend_evidence(evidence, matched)
         return Assessment(
             question_id=question.id,
             label=label,

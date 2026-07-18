@@ -218,6 +218,25 @@ def test_secondary_symbol_cannot_stand_in_for_the_primary_behavior_area() -> Non
     assert any("handlePayment" in gap for gap in assessment.gaps)
 
 
+def test_every_repository_concept_used_as_a_strength_is_cited() -> None:
+    question = Question(
+        id="behavior",
+        category=QuestionCategory.BEHAVIOR,
+        prompt="What behavior does handlePayment modify?",
+        rationale="The handler changed.",
+        references=(HANDLER_CITATION,),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(question_id="behavior", raw_text="processor.charge changes the external flow."),
+    )
+
+    assert any("processor.charge" in strength for strength in assessment.strengths)
+    assert any(citation.symbol == "processor.charge" for citation in assessment.evidence)
+
+
 def test_explicit_local_rollback_misconception_is_a_gap() -> None:
     assessment = HeuristicEvaluator().evaluate(
         payment_context(),
