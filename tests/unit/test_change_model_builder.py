@@ -203,10 +203,7 @@ def test_preserves_python_import_bindings_for_call_resolution(tmp_path: Path) ->
     source_path = tmp_path / "src" / "client.py"
     source_path.parent.mkdir()
     source_path.write_text(
-        "import requests as r\n"
-        "from requests import post\n"
-        "r.post('/audit')\n"
-        "post('/notify')\n"
+        "import requests as r\nfrom requests import post\nr.post('/audit')\npost('/notify')\n"
     )
     hunk = DiffHunk(
         file_path=Path("src/client.py"),

@@ -103,7 +103,7 @@ def test_detects_multiline_python_open_only_with_a_write_mode() -> None:
             "@@ -0,0 +1,5 @@\n"
             "+with open(\n"
             "+    path,\n"
-            "+    \"w\",\n"
+            '+    "w",\n'
             "+) as output:\n"
             "+    output.write(payload)\n"
         ),
@@ -113,13 +113,7 @@ def test_detects_multiline_python_open_only_with_a_write_mode() -> None:
         header="@@ -0,0 +1,4 @@",
         new_start=1,
         new_lines=4,
-        patch=(
-            "@@ -0,0 +1,4 @@\n"
-            "+with open(\n"
-            "+    path,\n"
-            "+    mode=\"r\",\n"
-            "+) as source:\n"
-        ),
+        patch=('@@ -0,0 +1,4 @@\n+with open(\n+    path,\n+    mode="r",\n+) as source:\n'),
     )
     context = ChangeContext(
         repo_root=Path("/repo"),
@@ -139,9 +133,7 @@ def test_detects_multiline_python_open_only_with_a_write_mode() -> None:
     detected = SideEffectDetector().detect(context)
 
     open_effects = [
-        effect
-        for effect in detected.likely_side_effects
-        if effect.evidence[0].symbol == "open"
+        effect for effect in detected.likely_side_effects if effect.evidence[0].symbol == "open"
     ]
     assert len(open_effects) == 1
     assert open_effects[0].evidence[0].file_path == Path("writer.py")
@@ -235,8 +227,7 @@ def test_resolves_imported_http_clients_and_functions_per_file() -> None:
         "client.post",
     ]
     assert all(
-        effect.kind is SideEffectKind.NETWORK_CALL
-        for effect in detected.likely_side_effects
+        effect.kind is SideEffectKind.NETWORK_CALL for effect in detected.likely_side_effects
     )
 
 

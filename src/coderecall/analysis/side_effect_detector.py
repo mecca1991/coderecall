@@ -19,9 +19,7 @@ from coderecall.core.types import (
 
 _TRANSACTION_CALLS = frozenset({"atomic", "transaction"})
 _OWNER_SCOPED_TRANSACTION_CALLS = frozenset({"begin", "commit", "rollback"})
-_TRANSACTION_OWNERS = frozenset(
-    {"connection", "conn", "database", "db", "session", "transaction"}
-)
+_TRANSACTION_OWNERS = frozenset({"connection", "conn", "database", "db", "session", "transaction"})
 _DATABASE_CALLS = frozenset(
     {
         "bulk_create",
@@ -73,9 +71,7 @@ _CONVENTIONAL_NETWORK_OWNERS = frozenset({"api", "client"})
 _FILE_WRITE_CALLS = frozenset(
     {"appendfile", "createwritestream", "write_bytes", "write_text", "writefile"}
 )
-_FILE_WRITE_OWNERS = frozenset(
-    {"file", "fs", "handle", "output", "path", "stream", "writer"}
-)
+_FILE_WRITE_OWNERS = frozenset({"file", "fs", "handle", "output", "path", "stream", "writer"})
 _MESSAGE_CALLS = frozenset(
     {"apply_async", "delay", "enqueue", "produce", "publish", "send_message", "sendmessage"}
 )
@@ -244,9 +240,7 @@ class SideEffectDetector:
         parts: tuple[str, ...],
     ) -> bool:
         terminal = parts[-1]
-        if terminal in _NETWORK_STANDALONE_CALLS or any(
-            part in _NETWORK_ROOTS for part in parts
-        ):
+        if terminal in _NETWORK_STANDALONE_CALLS or any(part in _NETWORK_ROOTS for part in parts):
             return True
         if (
             len(parts) > 1
