@@ -127,7 +127,18 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     }.issubset(set(FIXTURE_FILES))
 
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(app, ["review", "--base", "main", "--plain"])
+    result = CliRunner().invoke(
+        app,
+        ["review", "--base", "main", "--plain"],
+        input=(
+            "It adds an idempotency key.\n"
+            "Retries reuse the stored payment result.\n"
+            "\n"
+            "\n"
+            "The retry test checks that the processor is called once.\n"
+            "\n"
+        ),
+    )
 
     assert result.exit_code == 0
     assert "Diff summary" in result.output
@@ -138,6 +149,7 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert "Likely side effects:" in result.output
     assert "network call:" in result.output
     assert "transaction boundary:" in result.output
-    assert result.output.index("Diff summary") < result.output.index(
-        "Question and report generation are not implemented yet."
-    )
+    assert result.output.index("Diff summary") < result.output.index("Question 1 of 3 [behavior]")
+    assert "Question 2 of 3 [failure]" in result.output
+    assert "Question 3 of 3 [evidence]" in result.output
+    assert "Answers: 2 answered, 1 skipped" in result.output

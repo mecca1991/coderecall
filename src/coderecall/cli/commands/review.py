@@ -1,4 +1,4 @@
-"""Implementation scaffold for the review command."""
+"""Implementation of the review command."""
 
 from __future__ import annotations
 
@@ -11,8 +11,10 @@ from coderecall.analysis import (
     ChangeModelBuilder,
     DiffSummaryService,
     FileFilter,
+    QuestionGenerator,
     SideEffectDetector,
 )
+from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.core.errors import CodeRecallError
 from coderecall.core.types import ChangedFile, DiffSummary, FileStatus, FilteredFile
 from coderecall.git import DiffCollector, GitAdapter
@@ -90,6 +92,7 @@ def review_command(
         3,
         "--questions",
         min=1,
+        max=3,
         help="Number of questions to ask.",
     ),
     no_follow_up: bool = typer.Option(
@@ -143,9 +146,15 @@ def review_command(
     if not diff.changed_files:
         typer.echo("Review stopped: no meaningful files remain after filtering.")
         return
-    typer.echo(f"Report path: {report}")
-    typer.echo(f"Questions: {questions}")
-    typer.echo(f"Follow-up enabled: {not no_follow_up}")
-    typer.echo(f"Include uncommitted changes: {include_uncommitted}")
-    typer.echo(f"Plain output: {plain}")
-    typer.echo("Question and report generation are not implemented yet.")
+
+    try:
+        generated_questions = QuestionGenerator().generate(context)
+    except ValueError:
+        typer.echo("Review stopped: changed files contain no analyzable question evidence.")
+        return
+
+    selected_questions = generated_questions[:questions]
+    answers = TerminalSessionAdapter().capture_answers(selected_questions)
+    answered_count = sum(not answer.skipped for answer in answers)
+    skipped_count = len(answers) - answered_count
+    typer.echo(f"\nAnswers: {answered_count} answered, {skipped_count} skipped")
