@@ -450,6 +450,30 @@ def test_test_path_alone_does_not_count_as_behavior_support() -> None:
     assert "supports" in " ".join(assessment.gaps)
 
 
+def test_uncovered_word_does_not_count_as_positive_coverage_support() -> None:
+    question = Question(
+        id="evidence",
+        category=QuestionCategory.EVIDENCE,
+        prompt="What does the changed test support, and what remains unverified?",
+        rationale="The handler and its test changed.",
+        references=(HANDLER_CITATION, TEST_CITATION),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(
+            question_id="evidence",
+            raw_text=(
+                "tests/payment_handler.test.ts and handlePayment changed; failures are uncovered."
+            ),
+        ),
+    )
+
+    assert assessment.label is AssessmentLabel.PARTIAL
+    assert "supports" in " ".join(assessment.gaps)
+
+
 def test_sparse_file_only_context_cannot_produce_strong() -> None:
     path = Path("src/settings.toml")
     context = ChangeContext(

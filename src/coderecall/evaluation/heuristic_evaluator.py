@@ -44,6 +44,7 @@ _SUPPORT_TERMS = (
     "support",
     "verify",
 )
+_SUPPORT_TERM = re.compile(r"\b(?:" + "|".join(_SUPPORT_TERMS) + ")")
 _DIRECT_TEST_VERB = (
     r"(?<!not )(?<!never )(?<!no )"
     r"\b(?:test|tests|tested|testing|exercise|exercises|exercised|exercising)\s+"
@@ -251,9 +252,7 @@ class HeuristicEvaluator:
         context: ChangeContext,
     ) -> tuple[AssessmentLabel, tuple[str, ...]]:
         missing = tuple(concept for concept in cited if not self._matches(text, concept))
-        support = any(term in text for term in _SUPPORT_TERMS) or self._direct_test_support(
-            text, cited
-        )
+        support = _SUPPORT_TERM.search(text) is not None or self._direct_test_support(text, cited)
         uncovered = _UNCOVERED.search(text) is not None
         structured = any(
             concept.citation.kind == "test"
