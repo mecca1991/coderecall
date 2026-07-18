@@ -55,7 +55,7 @@ def test_builds_python_and_typescript_context_from_real_diff(tmp_path: Path) -> 
     repository = git.detect_repository()
     diff = DiffCollector(git, file_filter=FileFilter()).collect(repository, "main")
 
-    context = ChangeModelBuilder().build(repository, "main", diff)
+    context = ChangeModelBuilder(source_reader=git).build(repository, "main", diff)
 
     assert {symbol.name for symbol in context.changed_symbols} >= {
         "run",
@@ -68,3 +68,26 @@ def test_builds_python_and_typescript_context_from_real_diff(tmp_path: Path) -> 
         "api.get",
         "run",
     }
+
+
+def test_reads_committed_snapshot_when_worktree_is_dirty(tmp_path: Path) -> None:
+    run_git(tmp_path, "init", "--quiet")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "main")
+    run_git(tmp_path, "config", "user.name", "CodeRecall Tests")
+    run_git(tmp_path, "config", "user.email", "tests@coderecall.local")
+    source_path = tmp_path / "service.py"
+    source_path.write_text("def base():\n    return old_call()\n")
+    commit_all(tmp_path, "Add base service")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/snapshot")
+    source_path.write_text("def committed():\n    return target_call()\n")
+    commit_all(tmp_path, "Change committed service")
+    source_path.write_text("def dirty():\n    return dirty_call()\n")
+
+    git = GitAdapter(tmp_path)
+    repository = git.detect_repository()
+    diff = DiffCollector(git, file_filter=FileFilter()).collect(repository, "main")
+
+    context = ChangeModelBuilder(source_reader=git).build(repository, "main", diff)
+
+    assert [symbol.name for symbol in context.changed_symbols] == ["committed"]
+    assert [reference.name for reference in context.call_sites] == ["target_call"]

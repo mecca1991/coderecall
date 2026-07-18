@@ -45,6 +45,14 @@ class RawDiffOutput:
     record_selection: tuple[bool, ...] | None = None
 
 
+@dataclass(frozen=True)
+class RevisionFile:
+    """Bounded file content read from an immutable Git revision."""
+
+    content: bytes | None
+    size: int
+
+
 class _PrefixedReader:
     """Read an initial byte prefix before continuing from a binary stream."""
 
@@ -174,6 +182,79 @@ class GitAdapter:
             self._raise_missing_merge_base(base_branch)
         return merge_bases[0]
 
+    def resolve_revision(self, repository: RepositoryContext, revision: str) -> str:
+        """Resolve a commit reference to an immutable object ID."""
+
+        result = self._run(
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            f"{revision}^{{commit}}",
+            cwd=repository.root,
+        )
+        if result.returncode != 0:
+            details = result.stderr.strip() or f"Git exited with {result.returncode}."
+            command = self._display_command(
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{revision}^{{commit}}",
+            )
+            raise GitCommandFailed(
+                f"CodeRecall could not resolve Git revision `{revision}`.",
+                recovery="Check the repository state and run CodeRecall again.",
+                debug_details=f"{command}: {details}",
+            )
+        object_id = result.stdout.strip()
+        if not object_id:
+            raise GitCommandFailed(
+                f"Git did not return an object ID for revision `{revision}`.",
+                recovery="Check the repository state and run CodeRecall again.",
+            )
+        return object_id
+
+    def read_file_at_revision(
+        self,
+        repository: RepositoryContext,
+        revision: str,
+        path: Path,
+        *,
+        max_bytes: int,
+    ) -> RevisionFile | None:
+        """Read one bounded blob without consulting the working tree."""
+
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        object_name = f"{revision}:{path.as_posix()}"
+        object_result = self._run(
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            object_name,
+            cwd=repository.root,
+        )
+        if object_result.returncode != 0:
+            return None
+        object_id = object_result.stdout.strip()
+        if not object_id:
+            return None
+
+        size_result = self._run("cat-file", "-s", object_id, cwd=repository.root)
+        if size_result.returncode != 0:
+            return None
+        try:
+            size = int(size_result.stdout.strip())
+        except ValueError:
+            return None
+        if size > max_bytes:
+            return RevisionFile(content=None, size=size)
+
+        content_result = self._run("cat-file", "blob", object_id, cwd=repository.root)
+        if content_result.returncode != 0:
+            return None
+        content = content_result.stdout.encode("utf-8", errors="surrogateescape")
+        return RevisionFile(content=content, size=size)
+
     def collect_diff(
         self,
         repository: RepositoryContext,
@@ -185,10 +266,11 @@ class GitAdapter:
         max_raw_metadata_bytes: int = _DEFAULT_MAX_RAW_METADATA_BYTES,
         record_selector: Callable[[bytes], tuple[bool, ...]] | None = None,
         include_uncommitted: bool = False,
+        target_revision: str = "HEAD",
     ) -> RawDiffOutput:
         """Stream atomic file metadata and bounded patches in diff order."""
 
-        revisions = self._diff_revisions(merge_base, include_uncommitted)
+        revisions = self._diff_revisions(merge_base, target_revision, include_uncommitted)
         arguments = (
             "diff",
             "--raw",
@@ -325,10 +407,14 @@ class GitAdapter:
         return environment
 
     @staticmethod
-    def _diff_revisions(merge_base: str, include_uncommitted: bool) -> tuple[str, ...]:
+    def _diff_revisions(
+        merge_base: str,
+        target_revision: str,
+        include_uncommitted: bool,
+    ) -> tuple[str, ...]:
         if include_uncommitted:
             return (merge_base,)
-        return (merge_base, "HEAD")
+        return (merge_base, target_revision)
 
     def _raise_diff_failure(
         self,

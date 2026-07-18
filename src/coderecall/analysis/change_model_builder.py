@@ -8,6 +8,7 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
+from coderecall.core.errors import CodeRecallError
 from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
@@ -17,6 +18,7 @@ from coderecall.core.types import (
     DiffHunk,
     RepositoryContext,
 )
+from coderecall.git.git_adapter import GitAdapter
 
 _LANGUAGES_BY_SUFFIX = {
     ".py": "python",
@@ -57,6 +59,7 @@ class ChangeModelBuilder:
     def __init__(
         self,
         *,
+        source_reader: GitAdapter | None = None,
         max_source_bytes: int = 256_000,
         max_evidence_per_file: int = 200,
     ) -> None:
@@ -64,6 +67,7 @@ class ChangeModelBuilder:
             raise ValueError("max_source_bytes must be positive")
         if max_evidence_per_file < 1:
             raise ValueError("max_evidence_per_file must be positive")
+        self.source_reader = source_reader
         self.max_source_bytes = max_source_bytes
         self.max_evidence_per_file = max_evidence_per_file
 
@@ -95,7 +99,7 @@ class ChangeModelBuilder:
                 if changed_file.hunks:
                     unsupported_paths.append(changed_file.path)
                 continue
-            source, note = self._read_source(repository.root, changed_file.path)
+            source, note = self._read_source(repository, diff, changed_file.path)
             if note is not None:
                 uncertainty_notes.append(note)
             if source is None:
@@ -155,7 +159,51 @@ class ChangeModelBuilder:
             uncertainty_notes=tuple(uncertainty_notes),
         )
 
-    def _read_source(self, root: Path, relative_path: Path) -> tuple[str | None, str | None]:
+    def _read_source(
+        self,
+        repository: RepositoryContext,
+        diff: DiffCollection,
+        relative_path: Path,
+    ) -> tuple[str | None, str | None]:
+        if not diff.includes_uncommitted and diff.source_revision is not None:
+            return self._read_revision_source(repository, diff.source_revision, relative_path)
+        return self._read_worktree_source(repository.root, relative_path)
+
+    def _read_revision_source(
+        self,
+        repository: RepositoryContext,
+        revision: str,
+        relative_path: Path,
+    ) -> tuple[str | None, str | None]:
+        if self.source_reader is None:
+            return (
+                None,
+                f"Could not read committed source file {self._format_path(relative_path)}.",
+            )
+        try:
+            revision_file = self.source_reader.read_file_at_revision(
+                repository,
+                revision,
+                relative_path,
+                max_bytes=self.max_source_bytes,
+            )
+        except CodeRecallError:
+            revision_file = None
+        if revision_file is None:
+            return None, f"Could not read source file {self._format_path(relative_path)}."
+        if revision_file.content is None:
+            return (
+                None,
+                f"Skipped source analysis for {self._format_path(relative_path)} because the "
+                f"file exceeds {self.max_source_bytes:,} bytes.",
+            )
+        return revision_file.content.decode("utf-8", errors="surrogateescape"), None
+
+    def _read_worktree_source(
+        self,
+        root: Path,
+        relative_path: Path,
+    ) -> tuple[str | None, str | None]:
         resolved_root = root.resolve()
         try:
             source_path = (resolved_root / relative_path).resolve()

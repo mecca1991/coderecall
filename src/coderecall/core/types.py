@@ -88,6 +88,7 @@ class DiffCollection:
     diff_hunks: tuple[DiffHunk, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
     includes_uncommitted: bool = False
+    source_revision: str | None = None
 
 
 @dataclass(frozen=True)
