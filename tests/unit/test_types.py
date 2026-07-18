@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from coderecall.core.types import (
@@ -18,6 +19,39 @@ from coderecall.core.types import (
     Report,
     SideEffectKind,
 )
+
+
+def test_assessment_label_contract() -> None:
+    assert [(label.name, label.value) for label in AssessmentLabel] == [
+        ("STRONG", "Strong"),
+        ("PARTIAL", "Partial"),
+        ("GAP_FOUND", "Gap found"),
+        ("UNCERTAIN", "Uncertain"),
+    ]
+
+
+def test_assessment_labels_round_trip_through_json() -> None:
+    for label in AssessmentLabel:
+        serialized = json.dumps(label)
+
+        assert serialized == json.dumps(label.value)
+        assert AssessmentLabel(json.loads(serialized)) is label
+
+
+def test_uncertain_assessment_preserves_notes_without_evidence() -> None:
+    assessment = Assessment(
+        question_id="q1",
+        label=AssessmentLabel.UNCERTAIN,
+        summary="The available context does not support a confident assessment.",
+        confidence="low",
+        uncertainty_notes=("The relevant implementation is outside the branch diff.",),
+    )
+
+    assert assessment.label is AssessmentLabel.UNCERTAIN
+    assert assessment.evidence == ()
+    assert assessment.uncertainty_notes == (
+        "The relevant implementation is outside the branch diff.",
+    )
 
 
 def test_change_context_captures_changed_and_filtered_files() -> None:

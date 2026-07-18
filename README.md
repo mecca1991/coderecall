@@ -54,6 +54,18 @@ coderecall review --base main --plain
 
 Styled and plain sessions use the same wording and section order, so color never carries meaning.
 
+### Assessment Labels
+
+Answer evaluation will use a stable, non-numeric assessment vocabulary:
+
+- `Strong`: The answer matches repository evidence and covers the important reasoning.
+- `Partial`: The answer is directionally correct but misses a relevant detail.
+- `Gap found`: The answer conflicts with repository evidence or misses a critical failure mode.
+- `Uncertain`: CodeRecall cannot confidently evaluate the answer from available evidence.
+
+These labels describe evidence-supported understanding rather than scoring the developer. An
+`Uncertain` assessment can explain the missing or insufficient evidence in uncertainty notes.
+
 The complete workflow will eventually continue by:
 
 1. Evaluating answers against repository evidence.
