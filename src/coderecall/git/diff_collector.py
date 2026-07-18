@@ -77,8 +77,8 @@ class DiffCollector:
     ) -> DiffCollection:
         """Collect one structured comparison against the selected base branch."""
 
-        merge_base = self.git.find_merge_base(repository, base_branch)
         source_revision = self.git.resolve_revision(repository, "HEAD")
+        merge_base = self.git.find_merge_base(repository, base_branch, source_revision)
         filter_result: FileFilterResult | None = None
 
         def select_records(metadata: bytes) -> tuple[bool, ...]:

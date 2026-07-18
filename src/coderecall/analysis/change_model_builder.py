@@ -246,7 +246,6 @@ class ChangeModelBuilder:
         source: str,
     ) -> tuple[tuple[ChangedSymbol, ...], tuple[CodeReference, ...], tuple[CodeReference, ...]]:
         tree = ast.parse(source, filename=str(changed_file.path))
-        added_lines = ChangeModelBuilder._added_line_numbers(changed_file.hunks)
         affected_lines = ChangeModelBuilder._affected_line_numbers(changed_file.hunks)
         nodes = sorted(
             ast.walk(tree),
@@ -282,7 +281,7 @@ class ChangeModelBuilder:
                     )
                     for alias in node.names
                 )
-            elif isinstance(node, ast.Call) and node.lineno in added_lines:
+            elif isinstance(node, ast.Call) and node.lineno in affected_lines:
                 name = ChangeModelBuilder._python_call_name(node.func)
                 if name is not None:
                     calls.append(CodeReference(changed_file.path, "call", name, node.lineno))
@@ -294,7 +293,6 @@ class ChangeModelBuilder:
         changed_file: ChangedFile,
         source: str,
     ) -> tuple[tuple[ChangedSymbol, ...], tuple[CodeReference, ...], tuple[CodeReference, ...]]:
-        added_lines = ChangeModelBuilder._added_line_numbers(changed_file.hunks)
         affected_lines = ChangeModelBuilder._affected_line_numbers(changed_file.hunks)
         symbols: list[ChangedSymbol] = []
         imports: list[CodeReference] = []
@@ -331,7 +329,7 @@ class ChangeModelBuilder:
                     )
                 )
 
-            if line_number not in added_lines:
+            if line_number not in affected_lines:
                 continue
             declaration = declarations.get(line_number)
             declared_name = declaration.name if declaration is not None else None
@@ -440,21 +438,6 @@ class ChangeModelBuilder:
                     )
                 )
         return tuple(symbols)
-
-    @staticmethod
-    def _added_line_numbers(hunks: tuple[DiffHunk, ...]) -> frozenset[int]:
-        added_lines: set[int] = set()
-        for hunk in hunks:
-            new_line = hunk.new_start or 0
-            for line in hunk.patch.split("\n")[1:]:
-                if not line:
-                    continue
-                if line.startswith("+"):
-                    added_lines.add(new_line)
-                    new_line += 1
-                elif not line.startswith("-") and not line.startswith("\\"):
-                    new_line += 1
-        return frozenset(added_lines)
 
     @staticmethod
     def _affected_line_numbers(hunks: tuple[DiffHunk, ...]) -> frozenset[int]:

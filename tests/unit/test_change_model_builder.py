@@ -312,15 +312,15 @@ def test_distinguishes_typescript_methods_from_calls(tmp_path: Path) -> None:
 def test_identifies_python_symbol_for_deletion_only_hunk(tmp_path: Path) -> None:
     source_path = tmp_path / "src" / "service.py"
     source_path.parent.mkdir()
-    source_path.write_text("def run():\n    return True\n")
+    source_path.write_text("def run():\n    cleanup()\n    return True\n")
     hunk = DiffHunk(
         file_path=Path("src/service.py"),
-        header="@@ -1,3 +1,2 @@",
+        header="@@ -1,4 +1,3 @@",
         old_start=1,
-        old_lines=3,
+        old_lines=4,
         new_start=1,
-        new_lines=2,
-        patch="@@ -1,3 +1,2 @@\n def run():\n-    audit()\n     return True\n",
+        new_lines=3,
+        patch=("@@ -1,4 +1,3 @@\n def run():\n-    audit()\n     cleanup()\n     return True\n"),
     )
     diff = DiffCollection(
         merge_base="abc123",
@@ -337,6 +337,7 @@ def test_identifies_python_symbol_for_deletion_only_hunk(tmp_path: Path) -> None
     context = ChangeModelBuilder().build(repository, "main", diff)
 
     assert [symbol.name for symbol in context.changed_symbols] == ["run"]
+    assert [reference.name for reference in context.call_sites] == ["cleanup"]
 
 
 def test_identifies_typescript_symbol_for_body_only_edit(tmp_path: Path) -> None:

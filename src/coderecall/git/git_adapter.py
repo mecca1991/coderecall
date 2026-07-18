@@ -169,18 +169,23 @@ class GitAdapter:
             debug_details="Checked local refs: main, master.",
         )
 
-    def find_merge_base(self, repository: RepositoryContext, base_branch: str) -> str:
+    def find_merge_base(
+        self,
+        repository: RepositoryContext,
+        base_branch: str,
+        target_revision: str = "HEAD",
+    ) -> str:
         """Return the common ancestor used for the branch comparison."""
 
-        result = self._run("merge-base", base_branch, "HEAD", cwd=repository.root)
+        result = self._run("merge-base", base_branch, target_revision, cwd=repository.root)
         if result.returncode == 1 and not result.stdout.strip():
-            self._raise_missing_merge_base(base_branch)
+            self._raise_missing_merge_base(base_branch, target_revision)
         if result.returncode != 0:
-            self._raise_diff_failure(result, "merge-base", base_branch, "HEAD")
+            self._raise_diff_failure(result, "merge-base", base_branch, target_revision)
 
         merge_bases = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         if not merge_bases:
-            self._raise_missing_merge_base(base_branch)
+            self._raise_missing_merge_base(base_branch, target_revision)
         return merge_bases[0]
 
     def resolve_revision(self, repository: RepositoryContext, revision: str) -> str:
@@ -440,11 +445,11 @@ class GitAdapter:
             debug_details=f"{self._display_command(*arguments)}: {details}",
         )
 
-    def _raise_missing_merge_base(self, base_branch: str) -> None:
+    def _raise_missing_merge_base(self, base_branch: str, target_revision: str) -> None:
         raise DiffCollectionFailed(
             f"Git could not find a merge base between `{base_branch}` and `HEAD`.",
             recovery="Choose a base branch that shares history with the current branch.",
-            debug_details=self._display_command("merge-base", base_branch, "HEAD"),
+            debug_details=self._display_command("merge-base", base_branch, target_revision),
         )
 
     @staticmethod
