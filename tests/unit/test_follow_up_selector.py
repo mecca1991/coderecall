@@ -91,6 +91,9 @@ def test_selects_a_grounded_gap_and_builds_a_stable_respectful_question() -> Non
     assert follow_up.question.id == "failure-follow-up"
     assert follow_up.question.category is QuestionCategory.FOLLOW_UP
     assert gap in follow_up.question.prompt
+    assert "processor.charge" in follow_up.question.prompt
+    assert "database.transaction" in follow_up.question.prompt
+    assert "reconciliation" in follow_up.question.prompt
     assert "incorrect" not in follow_up.question.prompt.lower()
     assert "failed" not in follow_up.question.prompt.lower()
     assert follow_up.question.references == (CHARGE, TRANSACTION)

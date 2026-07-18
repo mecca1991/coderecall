@@ -17,7 +17,7 @@ from coderecall.analysis import (
 )
 from coderecall.cli.app import app
 from coderecall.core.types import Answer, AssessmentLabel, QuestionCategory, SideEffectKind
-from coderecall.evaluation import HeuristicEvaluator
+from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "payment_idempotency"
@@ -168,16 +168,31 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
         "database.transaction",
     }
 
+    follow_up = FollowUpSelector().select(detected, questions, assessments)
+
+    assert follow_up is not None
+    assert follow_up.question.id == "failure-follow-up"
+    assert tuple(citation.symbol for citation in follow_up.question.references) == (
+        "processor.charge",
+        "database.transaction",
+    )
+    assert "processor.charge" in follow_up.question.prompt
+    assert "database.transaction" in follow_up.question.prompt
+    assert "reconciliation" in follow_up.question.prompt
+
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
         ["review", "--base", "main", "--plain"],
         input=(
-            "It adds an idempotency key.\n"
-            "Retries reuse the stored payment result.\n"
+            "handlePayment calls payments.findByIdempotencyKey and returns the existing "
+            "payment before capturePayment.\n"
             "\n"
+            "database.transaction rollback undoes processor.charge, so retry is safe.\n"
             "\n"
-            "The retry test checks that the processor is called once.\n"
+            "tests/payment_handler.test.ts checks handlePayment returns the stored "
+            "idempotency-key payment. It does not cover a processor failure after charging.\n"
+            "\n"
             "\n"
         ),
     )
@@ -208,10 +223,48 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert "Question 1/3 — Behavior" in result.output
     assert "Question 2/3 — Failure" in result.output
     assert "Question 3/3 — Evidence" in result.output
-    assert result.output.count("Answer:\n") == 3
-    assert result.output.count("Answer recorded.\n") == 2
+    assert result.output.count("Follow-up\n") == 1
+    assert "processor.charge" in result.output
+    assert "database.transaction" in result.output
+    assert "reconciliation" in result.output
+    assert result.output.count("Answer:\n") == 4
+    assert result.output.count("Answer recorded.\n") == 3
     assert result.output.count("Skipped.\n") == 1
-    assert result.output.endswith("\nSession complete\nAnswers: 2 answered, 1 skipped\n")
-    assert "It adds an idempotency key." not in result.output
-    assert "The retry test checks" not in result.output
+    assert result.output.endswith("\nSession complete\nAnswers: 3 answered, 1 skipped\n")
+    assert "handlePayment calls payments.findByIdempotencyKey" not in result.output
+    assert "rollback undoes processor.charge" not in result.output
+    assert "checks handlePayment returns" not in result.output
     assert "\x1b" not in result.output
+
+    disabled = CliRunner().invoke(
+        app,
+        ["review", "--base", "main", "--plain", "--no-follow-up"],
+        input=(
+            "handlePayment calls payments.findByIdempotencyKey and returns the existing "
+            "payment before capturePayment.\n\n"
+            "database.transaction rollback undoes processor.charge, so retry is safe.\n\n"
+            "tests/payment_handler.test.ts checks handlePayment returns the stored "
+            "idempotency-key payment. It does not cover a processor failure after charging.\n\n"
+        ),
+    )
+
+    assert disabled.exit_code == 0
+    assert "Follow-up\n" not in disabled.output
+    assert disabled.output.endswith("\nSession complete\nAnswers: 3 answered, 0 skipped\n")
+
+    all_strong = CliRunner().invoke(
+        app,
+        ["review", "--base", "main", "--plain"],
+        input=(
+            "handlePayment calls payments.findByIdempotencyKey and returns the existing "
+            "payment before capturePayment.\n\n"
+            "processor.charge can succeed before database.transaction rolls back. A retry "
+            "could charge again, so the flow needs idempotency or reconciliation.\n\n"
+            "tests/payment_handler.test.ts checks handlePayment returns the stored "
+            "idempotency-key payment. It does not cover a processor failure after charging.\n\n"
+        ),
+    )
+
+    assert all_strong.exit_code == 0
+    assert "Follow-up\n" not in all_strong.output
+    assert all_strong.output.endswith("\nSession complete\nAnswers: 3 answered, 0 skipped\n")

@@ -42,9 +42,7 @@ class FollowUpSelector:
 
         changed_paths = {changed_file.path for changed_file in context.changed_files}
         assessment_by_id = {assessment.question_id: assessment for assessment in assessments}
-        candidates: list[
-            tuple[int, int, int, Question, str, tuple[EvidenceCitation, ...]]
-        ] = []
+        candidates: list[tuple[int, int, int, Question, str, tuple[EvidenceCitation, ...]]] = []
         for index, question in enumerate(questions):
             assessment = assessment_by_id[question.id]
             if assessment.label not in _LABEL_PRIORITY:
@@ -69,12 +67,23 @@ class FollowUpSelector:
             return None
 
         _, _, _, source, gap, evidence = min(candidates, key=lambda item: item[:3])
+        evidence_names = ", ".join(
+            f"`{name}`"
+            for name in dict.fromkeys(
+                citation.symbol or citation.file_path.as_posix() for citation in evidence
+            )
+        )
+        if source.category is QuestionCategory.FAILURE:
+            request = "What retry or reconciliation behavior addresses this risk"
+        elif source.category is QuestionCategory.EVIDENCE:
+            request = "How would you explain what the evidence supports and what remains open"
+        else:
+            request = "How would you explain the affected behavior"
         follow_up_question = Question(
             id=f"{source.id}-follow-up",
             category=QuestionCategory.FOLLOW_UP,
             prompt=(
-                f"To prepare for review, consider this gap: {gap} "
-                "How would you explain it using the cited changed-file evidence?"
+                f"To prepare for review, consider this gap: {gap} {request} using {evidence_names}?"
             ),
             rationale=(
                 "This follow-up focuses on one specific gap supported by local changed-file "

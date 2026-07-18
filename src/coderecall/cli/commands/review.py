@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -15,6 +16,7 @@ from coderecall.analysis import (
 )
 from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
+from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
 
 
@@ -94,4 +96,21 @@ def review_command(
 
     selected_questions = generated_questions[:questions]
     answers = terminal.capture_answers(selected_questions)
-    terminal.render_answer_counts(answers)
+    evaluator = HeuristicEvaluator()
+    assessments = tuple(
+        evaluator.evaluate(context, question, answer)
+        for question, answer in zip(selected_questions, answers, strict=True)
+    )
+    follow_up = FollowUpSelector().select(
+        context,
+        selected_questions,
+        assessments,
+        enabled=not no_follow_up,
+    )
+    all_answers = list(answers)
+    if follow_up is not None:
+        follow_up_answer = terminal.capture_follow_up(follow_up.question)
+        follow_up = replace(follow_up, answer=follow_up_answer)
+        all_answers.append(follow_up_answer)
+
+    terminal.render_answer_counts(all_answers)

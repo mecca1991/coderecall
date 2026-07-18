@@ -173,6 +173,28 @@ class TerminalSessionAdapter:
 
         return tuple(answers)
 
+    def capture_follow_up(self, question: Question) -> Answer:
+        """Capture one distinctly rendered adaptive follow-up response."""
+
+        self._print()
+        self._print("Follow-up", style=_HEADING_STYLE)
+        self._print(question.prompt)
+        self._print("Answer:")
+        lines: list[str] = []
+        while True:
+            line = self._input.readline()
+            if line == "":
+                answer = self._answer(question, lines)
+                self._render_answer_status(answer)
+                return answer
+
+            content = self._without_terminal_line_ending(line)
+            if content == "":
+                answer = self._answer(question, lines)
+                self._render_answer_status(answer)
+                return answer
+            lines.append(content)
+
     def _render_question_heading(
         self,
         index: int,
