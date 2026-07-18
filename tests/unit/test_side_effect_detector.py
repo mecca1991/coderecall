@@ -111,6 +111,44 @@ def test_ignores_generic_identifier_substrings_and_non_call_references() -> None
     assert detected is context
 
 
+def test_requires_recognized_receivers_for_ambiguous_method_names() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/ordinary-methods",
+        base_branch="main",
+        call_sites=(
+            CodeReference(Path("config.py"), "call", "config.update", 1),
+            CodeReference(Path("response.py"), "call", "response.write", 2),
+            CodeReference(Path("release.py"), "call", "git.commit", 3),
+        ),
+    )
+
+    detected = SideEffectDetector().detect(context)
+
+    assert detected is context
+
+
+def test_detects_common_database_operations_with_recognized_receivers() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/orm-writes",
+        base_branch="main",
+        call_sites=(
+            CodeReference(Path("service.py"), "call", "session.add", 1),
+            CodeReference(Path("service.py"), "call", "session.execute", 2),
+            CodeReference(Path("service.py"), "call", "cursor.execute", 3),
+        ),
+    )
+
+    detected = SideEffectDetector().detect(context)
+
+    assert [effect.kind for effect in detected.likely_side_effects] == [
+        SideEffectKind.DATABASE_WRITE,
+        SideEffectKind.DATABASE_WRITE,
+        SideEffectKind.DATABASE_WRITE,
+    ]
+
+
 def test_deduplicates_signals_and_preserves_existing_effects() -> None:
     hunk = DiffHunk(
         file_path=Path("client.py"),

@@ -15,23 +15,38 @@ from coderecall.core.types import (
     SideEffectKind,
 )
 
-_TRANSACTION_CALLS = frozenset({"atomic", "begin", "commit", "rollback", "transaction"})
+_TRANSACTION_CALLS = frozenset({"atomic", "transaction"})
+_OWNER_SCOPED_TRANSACTION_CALLS = frozenset({"begin", "commit", "rollback"})
+_TRANSACTION_OWNERS = frozenset(
+    {"connection", "conn", "database", "db", "session", "transaction"}
+)
 _DATABASE_CALLS = frozenset(
     {
         "bulk_create",
         "bulk_update",
         "bulkcreate",
         "bulkupdate",
-        "delete",
-        "flush",
         "insert",
-        "save",
-        "update",
         "upsert",
     }
 )
-_DATABASE_CREATE_OWNERS = frozenset(
-    {"database", "db", "model", "objects", "query", "repo", "repository", "session"}
+_OWNER_SCOPED_DATABASE_CALLS = frozenset(
+    {"add", "create", "delete", "execute", "flush", "save", "update"}
+)
+_DATABASE_OWNERS = frozenset(
+    {
+        "connection",
+        "conn",
+        "cursor",
+        "database",
+        "db",
+        "model",
+        "objects",
+        "query",
+        "repo",
+        "repository",
+        "session",
+    }
 )
 _NETWORK_ROOTS = frozenset(
     {
@@ -49,7 +64,10 @@ _NETWORK_ROOTS = frozenset(
 )
 _NETWORK_STANDALONE_CALLS = frozenset({"fetch", "request"})
 _FILE_WRITE_CALLS = frozenset(
-    {"appendfile", "createwritestream", "write", "write_bytes", "write_text", "writefile"}
+    {"appendfile", "createwritestream", "write_bytes", "write_text", "writefile"}
+)
+_FILE_WRITE_OWNERS = frozenset(
+    {"file", "fs", "handle", "output", "path", "stream", "writer"}
 )
 _MESSAGE_CALLS = frozenset(
     {"apply_async", "delay", "enqueue", "produce", "publish", "send_message", "sendmessage"}
@@ -181,13 +199,20 @@ class SideEffectDetector:
             return None
         terminal = parts[-1]
 
-        if terminal in _TRANSACTION_CALLS:
+        owners = parts[:-1]
+
+        if terminal in _TRANSACTION_CALLS or (
+            terminal in _OWNER_SCOPED_TRANSACTION_CALLS
+            and any(owner in _TRANSACTION_OWNERS for owner in owners)
+        ):
             return SideEffectKind.TRANSACTION_BOUNDARY
         if terminal in _NETWORK_STANDALONE_CALLS or any(part in _NETWORK_ROOTS for part in parts):
             return SideEffectKind.NETWORK_CALL
         if terminal in _MESSAGE_CALLS:
             return SideEffectKind.MESSAGE_PUBLISH
-        if terminal in _FILE_WRITE_CALLS:
+        if terminal in _FILE_WRITE_CALLS or (
+            terminal == "write" and any(owner in _FILE_WRITE_OWNERS for owner in owners)
+        ):
             return SideEffectKind.FILE_WRITE
         if terminal == "open" and SideEffectDetector._is_python_write_open(
             context,
@@ -197,7 +222,9 @@ class SideEffectDetector:
             return SideEffectKind.FILE_WRITE
         if terminal in _DATABASE_CALLS:
             return SideEffectKind.DATABASE_WRITE
-        if terminal == "create" and any(part in _DATABASE_CREATE_OWNERS for part in parts[:-1]):
+        if terminal in _OWNER_SCOPED_DATABASE_CALLS and any(
+            owner in _DATABASE_OWNERS for owner in owners
+        ):
             return SideEffectKind.DATABASE_WRITE
         return None
 
