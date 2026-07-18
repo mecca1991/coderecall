@@ -169,9 +169,7 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert result.output.count("Answer:\n") == 3
     assert result.output.count("Answer recorded.\n") == 2
     assert result.output.count("Skipped.\n") == 1
-    assert result.output.endswith(
-        "\nSession complete\nAnswers: 2 answered, 1 skipped\n"
-    )
+    assert result.output.endswith("\nSession complete\nAnswers: 2 answered, 1 skipped\n")
     assert "It adds an idempotency key." not in result.output
     assert "The retry test checks" not in result.output
     assert "\x1b" not in result.output

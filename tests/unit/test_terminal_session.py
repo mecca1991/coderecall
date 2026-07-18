@@ -143,9 +143,7 @@ def test_plain_session_has_stable_readable_multiline_output() -> None:
     )
     diff = DiffCollection(
         merge_base="1234567890abcdef",
-        changed_files=(
-            ChangedFile(path=Path("src/review.py"), status=FileStatus.MODIFIED),
-        ),
+        changed_files=(ChangedFile(path=Path("src/review.py"), status=FileStatus.MODIFIED),),
         filtered_files=(
             FilteredFile(
                 path=Path("package-lock.json"),

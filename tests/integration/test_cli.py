@@ -137,9 +137,7 @@ def test_review_reports_repository_context(
     assert '  - modified: "tracked.txt"' in result.output
     assert "Change summary" in result.output
     assert "Purpose: Likely updates code in 1 meaningful file." in result.output
-    assert result.output.index("Change summary") < result.output.index(
-        "Question 1/3 — Behavior"
-    )
+    assert result.output.index("Change summary") < result.output.index("Question 1/3 — Behavior")
     assert "Skipped." in result.output
     assert "End of input: 2 remaining questions skipped." in result.output
     assert "Session complete" in result.output
@@ -454,10 +452,7 @@ def test_review_stops_when_changed_files_have_no_analyzable_question_evidence(
 
     assert result.exit_code == 0
     assert "Change summary" in result.output
-    assert (
-        "Review stopped\nChanged files contain no analyzable question evidence."
-        in result.output
-    )
+    assert "Review stopped\nChanged files contain no analyzable question evidence." in result.output
     assert "Question 1" not in result.output
 
 
@@ -481,7 +476,4 @@ def test_review_does_not_hide_unexpected_question_generation_errors(
     assert result.exit_code == 1
     assert isinstance(result.exception, ValueError)
     assert str(result.exception) == "unexpected question-generation failure"
-    assert (
-        "Changed files contain no analyzable question evidence."
-        not in result.output
-    )
+    assert "Changed files contain no analyzable question evidence." not in result.output

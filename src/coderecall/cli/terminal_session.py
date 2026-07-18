@@ -105,12 +105,9 @@ class TerminalSessionAdapter:
                 evidence_paths = tuple(
                     dict.fromkeys(citation.file_path for citation in side_effect.evidence)
                 )
-                evidence = ", ".join(
-                    self._format_path(path) for path in evidence_paths[:3]
-                )
+                evidence = ", ".join(self._format_path(path) for path in evidence_paths[:3])
                 self._print(
-                    f"  - {side_effect.kind.value}: {side_effect.description} "
-                    f"Evidence: {evidence}"
+                    f"  - {side_effect.kind.value}: {side_effect.description} Evidence: {evidence}"
                 )
         if summary.uncertainty_notes:
             self._print("Uncertainty:")
@@ -157,9 +154,7 @@ class TerminalSessionAdapter:
                     answers.append(answer)
                     self._render_answer_status(answer)
                     remaining_count = len(questions) - index - 1
-                    answers.extend(
-                        self._skipped(remaining) for remaining in questions[index + 1 :]
-                    )
+                    answers.extend(self._skipped(remaining) for remaining in questions[index + 1 :])
                     if remaining_count:
                         noun = "question" if remaining_count == 1 else "questions"
                         self._print(
