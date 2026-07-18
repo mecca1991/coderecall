@@ -275,3 +275,22 @@ def test_behavior_question_describes_a_deleted_symbol_as_removed() -> None:
     assert "eliminate" in behavior.prompt
     assert "introduce or modify" not in behavior.prompt
     assert "removes" in behavior.rationale
+
+
+def test_refuses_binary_only_context_without_analyzable_evidence() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/update-image",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=Path("assets/diagram.png"),
+                status=FileStatus.MODIFIED,
+                is_binary=True,
+            ),
+        ),
+        uncertainty_notes=("The binary patch could not be inspected.",),
+    )
+
+    with pytest.raises(ValueError, match="analyzable change evidence"):
+        QuestionGenerator().generate(context)

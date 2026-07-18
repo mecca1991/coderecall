@@ -31,9 +31,13 @@ class QuestionGenerator:
         if not context.changed_files:
             raise ValueError("Question generation requires at least one meaningful changed file.")
 
-        changed_paths = {changed_file.path for changed_file in context.changed_files}
+        analysis_files = self._analyzable_files(context)
+        if not analysis_files:
+            raise ValueError("Question generation requires analyzable change evidence.")
+
+        changed_paths = {changed_file.path for changed_file in analysis_files}
         non_test_paths = {
-            changed_file.path for changed_file in context.changed_files if not changed_file.is_test
+            changed_file.path for changed_file in analysis_files if not changed_file.is_test
         }
         valid_symbols = tuple(
             symbol for symbol in context.changed_symbols if symbol.file_path in changed_paths
@@ -46,24 +50,18 @@ class QuestionGenerator:
             primary_symbol.file_path
             if primary_symbol is not None
             else next(
-                (
-                    changed_file.path
-                    for changed_file in context.changed_files
-                    if not changed_file.is_test
-                ),
-                context.changed_files[0].path,
+                (changed_file.path for changed_file in analysis_files if not changed_file.is_test),
+                analysis_files[0].path,
             )
         )
         primary_reference = self._primary_reference(primary_path, primary_symbol)
         primary_file = next(
-            changed_file
-            for changed_file in context.changed_files
-            if changed_file.path == primary_path
+            changed_file for changed_file in analysis_files if changed_file.path == primary_path
         )
         area = self._format_area(primary_path, primary_symbol)
         valid_effects = self._valid_side_effects(context.likely_side_effects, changed_paths)
         changed_test_paths = {
-            changed_file.path for changed_file in context.changed_files if changed_file.is_test
+            changed_file.path for changed_file in analysis_files if changed_file.is_test
         }
         related_tests = tuple(
             dict.fromkeys(path for path in context.related_tests if path in changed_test_paths)
@@ -73,6 +71,29 @@ class QuestionGenerator:
             self._behavior_question(area, primary_reference, primary_file),
             self._failure_question(area, primary_reference, valid_effects),
             self._evidence_question(area, primary_reference, related_tests),
+        )
+
+    @staticmethod
+    def _analyzable_files(context: ChangeContext) -> tuple[ChangedFile, ...]:
+        structured_paths = {symbol.file_path for symbol in context.changed_symbols}
+        structured_paths.update(reference.file_path for reference in context.nearby_imports)
+        structured_paths.update(reference.file_path for reference in context.call_sites)
+        structured_paths.update(
+            citation.file_path
+            for side_effect in context.likely_side_effects
+            for citation in side_effect.evidence
+        )
+        structured_paths.update(context.related_tests)
+        hunk_paths = {hunk.file_path for hunk in context.diff_hunks}
+        return tuple(
+            changed_file
+            for changed_file in context.changed_files
+            if not changed_file.is_binary
+            and (
+                bool(changed_file.hunks)
+                or changed_file.path in hunk_paths
+                or changed_file.path in structured_paths
+            )
         )
 
     @staticmethod
