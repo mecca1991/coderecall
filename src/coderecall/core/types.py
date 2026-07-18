@@ -158,6 +158,7 @@ class CodeReference:
     kind: str
     name: str
     line_start: int | None = None
+    local_name: str | None = None
 
 
 @dataclass(frozen=True)

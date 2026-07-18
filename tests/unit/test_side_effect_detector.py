@@ -149,6 +149,43 @@ def test_detects_common_database_operations_with_recognized_receivers() -> None:
     ]
 
 
+def test_resolves_imported_http_clients_and_functions_per_file() -> None:
+    client_path = Path("client.py")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/http-clients",
+        base_branch="main",
+        nearby_imports=(
+            CodeReference(client_path, "import", "requests", 1, local_name="r"),
+            CodeReference(client_path, "import", "requests.post", 2, local_name="post"),
+            CodeReference(client_path, "import", "httpx", 3, local_name="transport"),
+            CodeReference(Path("other.py"), "import", "requests", 1, local_name="remote"),
+        ),
+        call_sites=(
+            CodeReference(client_path, "call", "r.post", 4),
+            CodeReference(client_path, "call", "post", 5),
+            CodeReference(client_path, "call", "transport.get", 6),
+            CodeReference(client_path, "call", "api.get", 7),
+            CodeReference(client_path, "call", "client.post", 8),
+            CodeReference(client_path, "call", "remote.post", 9),
+        ),
+    )
+
+    detected = SideEffectDetector().detect(context)
+
+    assert [effect.evidence[0].symbol for effect in detected.likely_side_effects] == [
+        "r.post",
+        "post",
+        "transport.get",
+        "api.get",
+        "client.post",
+    ]
+    assert all(
+        effect.kind is SideEffectKind.NETWORK_CALL
+        for effect in detected.likely_side_effects
+    )
+
+
 def test_deduplicates_signals_and_preserves_existing_effects() -> None:
     hunk = DiffHunk(
         file_path=Path("client.py"),

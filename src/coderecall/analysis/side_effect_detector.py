@@ -58,11 +58,16 @@ _NETWORK_ROOTS = frozenset(
         "processor",
         "requests",
         "stripe",
+        "urllib",
         "webhook",
         "webhooks",
     }
 )
 _NETWORK_STANDALONE_CALLS = frozenset({"fetch", "request"})
+_NETWORK_METHODS = frozenset(
+    {"delete", "get", "head", "options", "patch", "post", "put", "request", "urlopen"}
+)
+_CONVENTIONAL_NETWORK_OWNERS = frozenset({"api", "client"})
 _FILE_WRITE_CALLS = frozenset(
     {"appendfile", "createwritestream", "write_bytes", "write_text", "writefile"}
 )
@@ -206,7 +211,7 @@ class SideEffectDetector:
             and any(owner in _TRANSACTION_OWNERS for owner in owners)
         ):
             return SideEffectKind.TRANSACTION_BOUNDARY
-        if terminal in _NETWORK_STANDALONE_CALLS or any(part in _NETWORK_ROOTS for part in parts):
+        if SideEffectDetector._is_network_call(context, reference, parts):
             return SideEffectKind.NETWORK_CALL
         if terminal in _MESSAGE_CALLS:
             return SideEffectKind.MESSAGE_PUBLISH
@@ -227,6 +232,44 @@ class SideEffectDetector:
         ):
             return SideEffectKind.DATABASE_WRITE
         return None
+
+    @staticmethod
+    def _is_network_call(
+        context: ChangeContext,
+        reference: CodeReference,
+        parts: tuple[str, ...],
+    ) -> bool:
+        terminal = parts[-1]
+        if terminal in _NETWORK_STANDALONE_CALLS or any(
+            part in _NETWORK_ROOTS for part in parts
+        ):
+            return True
+        if (
+            len(parts) > 1
+            and parts[0] in _CONVENTIONAL_NETWORK_OWNERS
+            and terminal in _NETWORK_METHODS
+        ):
+            return True
+
+        imports = {
+            imported.local_name.lower(): imported.name.lower()
+            for imported in context.nearby_imports
+            if imported.file_path == reference.file_path
+            and imported.local_name
+            and SideEffectDetector._is_network_import(imported.name)
+        }
+        imported_name = imports.get(parts[0])
+        if imported_name is None:
+            return False
+        if len(parts) > 1:
+            return terminal in _NETWORK_METHODS
+        imported_terminal = imported_name.rsplit(".", maxsplit=1)[-1]
+        return imported_terminal in _NETWORK_METHODS
+
+    @staticmethod
+    def _is_network_import(name: str) -> bool:
+        parts = (part for part in name.lower().lstrip(".").split(".") if part)
+        return any(part in _NETWORK_ROOTS for part in parts)
 
     @staticmethod
     def _is_python_write_open(
