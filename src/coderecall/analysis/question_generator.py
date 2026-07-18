@@ -30,14 +30,27 @@ class QuestionGenerator:
             raise ValueError("Question generation requires at least one meaningful changed file.")
 
         changed_paths = {changed_file.path for changed_file in context.changed_files}
+        non_test_paths = {
+            changed_file.path for changed_file in context.changed_files if not changed_file.is_test
+        }
+        valid_symbols = tuple(
+            symbol for symbol in context.changed_symbols if symbol.file_path in changed_paths
+        )
         primary_symbol = next(
-            (symbol for symbol in context.changed_symbols if symbol.file_path in changed_paths),
-            None,
+            (symbol for symbol in valid_symbols if symbol.file_path in non_test_paths),
+            valid_symbols[0] if valid_symbols else None,
         )
         primary_path = (
             primary_symbol.file_path
             if primary_symbol is not None
-            else context.changed_files[0].path
+            else next(
+                (
+                    changed_file.path
+                    for changed_file in context.changed_files
+                    if not changed_file.is_test
+                ),
+                context.changed_files[0].path,
+            )
         )
         primary_reference = self._primary_reference(primary_path, primary_symbol)
         area = self._format_area(primary_path, primary_symbol)

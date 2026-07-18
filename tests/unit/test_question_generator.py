@@ -157,3 +157,37 @@ def test_evidence_question_names_a_changed_test_and_ignores_other_paths() -> Non
         ),
         EvidenceCitation(kind="test", file_path=test_path),
     )
+
+
+def test_prefers_a_non_test_symbol_for_the_primary_changed_area() -> None:
+    test_path = Path("a_tests/test_orders.py")
+    source_path = Path("src/orders.py")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/order-processing",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(path=test_path, status=FileStatus.ADDED, is_test=True),
+            ChangedFile(path=source_path, status=FileStatus.MODIFIED),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=test_path,
+                name="test_process_order",
+                kind="function",
+                line_start=4,
+            ),
+            ChangedSymbol(
+                file_path=source_path,
+                name="process_order",
+                kind="function",
+                line_start=12,
+            ),
+        ),
+        related_tests=(test_path,),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert all("`process_order`" in question.prompt for question in questions)
+    assert all("`test_process_order`" not in question.prompt for question in questions)
