@@ -16,7 +16,8 @@ from coderecall.analysis import (
     SideEffectDetector,
 )
 from coderecall.cli.app import app
-from coderecall.core.types import QuestionCategory, SideEffectKind
+from coderecall.core.types import Answer, AssessmentLabel, QuestionCategory, SideEffectKind
+from coderecall.evaluation import HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "payment_idempotency"
@@ -125,6 +126,47 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert {
         citation.file_path for question in questions for citation in question.references
     }.issubset(set(FIXTURE_FILES))
+
+    answers = (
+        Answer(
+            question_id="behavior",
+            raw_text=(
+                "handlePayment calls payments.findByIdempotencyKey and returns the existing "
+                "payment before capturePayment."
+            ),
+        ),
+        Answer(
+            question_id="failure",
+            raw_text=("database.transaction rollback undoes processor.charge, so retry is safe."),
+        ),
+        Answer(
+            question_id="evidence",
+            raw_text=(
+                "tests/payment_handler.test.ts checks handlePayment returns the stored "
+                "idempotency-key payment. It does not cover a processor failure after charging."
+            ),
+        ),
+    )
+    evaluator = HeuristicEvaluator()
+    assessments = tuple(
+        evaluator.evaluate(detected, question, answer)
+        for question, answer in zip(questions, answers, strict=True)
+    )
+
+    assert tuple(assessment.label for assessment in assessments) == (
+        AssessmentLabel.STRONG,
+        AssessmentLabel.GAP_FOUND,
+        AssessmentLabel.STRONG,
+    )
+    assert tuple(assessment.question_id for assessment in assessments) == (
+        "behavior",
+        "failure",
+        "evidence",
+    )
+    assert {citation.symbol for citation in assessments[1].evidence} == {
+        "processor.charge",
+        "database.transaction",
+    }
 
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
