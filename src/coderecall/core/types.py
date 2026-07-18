@@ -36,7 +36,13 @@ class QuestionCategory(StrEnum):
 
 
 class AssessmentLabel(StrEnum):
-    """Non-numeric answer assessment labels."""
+    """Stable, non-numeric labels for evidence-grounded answer assessment.
+
+    ``STRONG`` matches repository evidence and covers the important reasoning.
+    ``PARTIAL`` is directionally correct but misses a relevant detail.
+    ``GAP_FOUND`` conflicts with repository evidence or misses a critical failure mode.
+    ``UNCERTAIN`` means the available evidence cannot support a confident evaluation.
+    """
 
     STRONG = "Strong"
     PARTIAL = "Partial"
