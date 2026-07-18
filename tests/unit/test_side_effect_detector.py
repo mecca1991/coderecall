@@ -330,3 +330,27 @@ def test_marks_nearby_context_evidence_as_lower_confidence() -> None:
     detected = SideEffectDetector().detect(context)
 
     assert "lower confidence" in (detected.likely_side_effects[0].evidence[0].note or "")
+
+
+def test_does_not_match_a_hunk_when_reference_line_is_missing() -> None:
+    hunk = DiffHunk(
+        file_path=Path("client.py"),
+        header="@@ -1 +1 @@",
+        new_start=1,
+        new_lines=1,
+    )
+    reference = CodeReference(Path("client.py"), "call", "requests.post")
+
+    assert SideEffectDetector._find_hunk((hunk,), reference) is None
+
+
+def test_does_not_match_a_deletion_only_hunk_to_the_new_file() -> None:
+    hunk = DiffHunk(
+        file_path=Path("client.py"),
+        header="@@ -5 +5,0 @@",
+        new_start=5,
+        new_lines=0,
+    )
+    reference = CodeReference(Path("client.py"), "call", "requests.post", 5)
+
+    assert SideEffectDetector._find_hunk((hunk,), reference) is None

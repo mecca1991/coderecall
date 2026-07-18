@@ -387,11 +387,16 @@ class SideEffectDetector:
         reference: CodeReference,
     ) -> DiffHunk | None:
         if reference.line_start is None:
-            return next((hunk for hunk in hunks if hunk.file_path == reference.file_path), None)
+            return None
         for hunk in hunks:
-            if hunk.file_path != reference.file_path or hunk.new_start is None:
+            if (
+                hunk.file_path != reference.file_path
+                or hunk.new_start is None
+                or hunk.new_lines is None
+                or hunk.new_lines <= 0
+            ):
                 continue
-            end_line = hunk.new_start + max(hunk.new_lines or 0, 1) - 1
+            end_line = hunk.new_start + hunk.new_lines - 1
             if hunk.new_start <= reference.line_start <= end_line:
                 return hunk
         return None
