@@ -44,6 +44,11 @@ _SUPPORT_TERMS = (
     "support",
     "verify",
 )
+_DIRECT_TEST_VERB = (
+    r"(?<!not )(?<!never )(?<!no )"
+    r"\b(?:test|tests|tested|testing|exercise|exercises|exercised|exercising)\s+"
+    r"(?:the\s+)?"
+)
 _UNCOVERED = re.compile(
     r"\b(?:"
     r"(?:does|do|did|is|are|was|were) not (?:cover|test|verify|exercise)|"
@@ -246,7 +251,9 @@ class HeuristicEvaluator:
         context: ChangeContext,
     ) -> tuple[AssessmentLabel, tuple[str, ...]]:
         missing = tuple(concept for concept in cited if not self._matches(text, concept))
-        support = any(term in text for term in _SUPPORT_TERMS)
+        support = any(term in text for term in _SUPPORT_TERMS) or self._direct_test_support(
+            text, cited
+        )
         uncovered = _UNCOVERED.search(text) is not None
         structured = any(
             concept.citation.kind == "test"
@@ -268,6 +275,15 @@ class HeuristicEvaluator:
                 "the repository evidence shows."
             )
         return AssessmentLabel.PARTIAL, tuple(gaps)
+
+    @staticmethod
+    def _direct_test_support(text: str, cited: tuple[_Concept, ...]) -> bool:
+        return any(
+            re.search(rf"{_DIRECT_TEST_VERB}\b{re.escape(phrase)}\b", text)
+            for concept in cited
+            if concept.citation.symbol is not None
+            for phrase in HeuristicEvaluator._phrases(concept.citation.symbol)
+        )
 
     def _available_concepts(
         self,

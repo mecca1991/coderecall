@@ -391,6 +391,53 @@ def test_strong_evidence_answer_names_test_support_and_an_uncovered_path() -> No
     assert assessment.gaps == ()
 
 
+def test_direct_test_verb_statement_counts_as_behavior_support() -> None:
+    question = Question(
+        id="evidence",
+        category=QuestionCategory.EVIDENCE,
+        prompt="What does the changed test support, and what remains unverified?",
+        rationale="The handler and its test changed.",
+        references=(HANDLER_CITATION, TEST_CITATION),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(
+            question_id="evidence",
+            raw_text=(
+                "tests/payment_handler.test.ts tests handlePayment; it does not test failures."
+            ),
+        ),
+    )
+
+    assert assessment.label is AssessmentLabel.STRONG
+
+
+def test_test_path_alone_does_not_count_as_behavior_support() -> None:
+    question = Question(
+        id="evidence",
+        category=QuestionCategory.EVIDENCE,
+        prompt="What does the changed test support, and what remains unverified?",
+        rationale="The handler and its test changed.",
+        references=(HANDLER_CITATION, TEST_CITATION),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(
+            question_id="evidence",
+            raw_text=(
+                "tests/payment_handler.test.ts and handlePayment changed; failures are untested."
+            ),
+        ),
+    )
+
+    assert assessment.label is AssessmentLabel.PARTIAL
+    assert "supports" in " ".join(assessment.gaps)
+
+
 def test_sparse_file_only_context_cannot_produce_strong() -> None:
     path = Path("src/settings.toml")
     context = ChangeContext(
