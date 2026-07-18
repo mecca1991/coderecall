@@ -12,10 +12,11 @@ from coderecall.analysis import (
     ChangeModelBuilder,
     DiffSummaryService,
     FileFilter,
+    QuestionGenerator,
     SideEffectDetector,
 )
 from coderecall.cli.app import app
-from coderecall.core.types import SideEffectKind
+from coderecall.core.types import QuestionCategory, SideEffectKind
 from coderecall.git import DiffCollector, GitAdapter
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "payment_idempotency"
@@ -108,6 +109,22 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert summary.purpose.startswith("Likely updates `handlePayment`")
     assert "network call" in summary.purpose
     assert "transaction boundary" in summary.purpose
+
+    questions = QuestionGenerator().generate(detected)
+
+    assert tuple(question.category for question in questions) == (
+        QuestionCategory.BEHAVIOR,
+        QuestionCategory.FAILURE,
+        QuestionCategory.EVIDENCE,
+    )
+    assert "`handlePayment`" in questions[0].prompt
+    assert "`processor.charge`" in questions[1].prompt
+    assert "`database.transaction`" in questions[1].prompt
+    assert "partial success" in questions[1].rationale
+    assert '"tests/payment_handler.test.ts"' in questions[2].prompt
+    assert {
+        citation.file_path for question in questions for citation in question.references
+    }.issubset(set(FIXTURE_FILES))
 
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, ["review", "--base", "main", "--plain"])
