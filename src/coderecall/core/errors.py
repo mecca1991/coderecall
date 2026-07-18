@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 
 class CodeRecallError(Exception):
     """Base class for failures CodeRecall can explain and recover from."""
@@ -41,3 +43,17 @@ class QuestionGenerationUnavailable(CodeRecallError):
 
 class GitCommandFailed(CodeRecallError):
     """Raised when a Git command cannot be executed successfully."""
+
+
+class ReportWriteFailed(CodeRecallError):
+    """Raised when a local Markdown report cannot be written."""
+
+    def __init__(self, target_path: Path, underlying_error: OSError) -> None:
+        self.target_path = target_path
+        self.underlying_error = underlying_error
+        super().__init__(
+            f'Could not write the local report to "{target_path}": {underlying_error}',
+            recovery=(
+                "Choose a writable location with `coderecall review --report <path>` and try again."
+            ),
+        )
