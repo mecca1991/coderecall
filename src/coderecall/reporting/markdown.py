@@ -179,4 +179,5 @@ class MarkdownReportWriter:
     def _inline_code(value: str) -> str:
         longest_run = max((len(run) for run in re.findall(r"`+", value)), default=0)
         delimiter = "`" * max(1, longest_run + 1)
-        return f"{delimiter}{value}{delimiter}"
+        padding = " " if value.startswith("`") or value.endswith("`") else ""
+        return f"{delimiter}{padding}{value}{padding}{delimiter}"

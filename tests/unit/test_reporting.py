@@ -254,6 +254,27 @@ def test_render_includes_follow_up_answer_citations_and_optional_assessment() ->
     assert rendered.endswith("## Review Talking Points\n\n- Discuss recovery.\n")
 
 
+def test_render_pads_inline_code_that_starts_or_ends_with_a_backtick() -> None:
+    citation = EvidenceCitation(
+        kind="call",
+        file_path=Path("`src/report.py"),
+        symbol="render`",
+        hunk_header="`",
+    )
+    question = make_question(references=(citation,))
+    report = ReportBuilder(clock=lambda: NOW).build(
+        make_context(),
+        DiffSummary(purpose="Summary."),
+        (question,),
+        (Answer(question_id="behavior", raw_text="Answer."),),
+        (make_assessment(evidence=(citation,)),),
+    )
+
+    rendered = MarkdownReportWriter().render(report)
+
+    assert "- `` `src/report.py ``; symbol `` render` ``; hunk `` ` ``" in rendered
+
+
 def test_render_allows_follow_up_without_assessment() -> None:
     question = make_question()
     follow_up_question = make_question("behavior-follow-up", prompt="One more detail?")
