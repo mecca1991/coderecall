@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from coderecall.analysis import QuestionGenerator
 from coderecall.cli.app import app
 from coderecall.cli.commands.review import (
     _format_changed_file,
@@ -15,6 +16,7 @@ from coderecall.cli.commands.review import (
     _render_diff_summary,
 )
 from coderecall.core.types import (
+    ChangeContext,
     ChangedFile,
     DiffSummary,
     EvidenceCitation,
@@ -22,6 +24,7 @@ from coderecall.core.types import (
     FilteredFile,
     FilterReason,
     LikelySideEffect,
+    Question,
     SideEffectKind,
 )
 
@@ -519,3 +522,29 @@ def test_review_stops_when_changed_files_have_no_analyzable_question_evidence(
     assert "Diff summary" in result.output
     assert "Review stopped: changed files contain no analyzable question evidence." in result.output
     assert "Question 1" not in result.output
+
+
+def test_review_does_not_hide_unexpected_question_generation_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_python_feature_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    def raise_unexpected_error(
+        generator: QuestionGenerator,
+        context: ChangeContext,
+    ) -> tuple[Question, ...]:
+        raise ValueError("unexpected question-generation failure")
+
+    monkeypatch.setattr(QuestionGenerator, "generate", raise_unexpected_error)
+
+    result = runner.invoke(app, ["review", "--base", "main", "--plain"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, ValueError)
+    assert str(result.exception) == "unexpected question-generation failure"
+    assert (
+        "Review stopped: changed files contain no analyzable question evidence."
+        not in result.output
+    )

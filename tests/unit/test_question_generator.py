@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from coderecall.analysis import QuestionGenerator
+from coderecall.core.errors import QuestionGenerationUnavailable
 from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
@@ -58,7 +59,7 @@ def test_refuses_to_generate_generic_questions_without_meaningful_files() -> Non
         base_branch="main",
     )
 
-    with pytest.raises(ValueError, match="meaningful changed file"):
+    with pytest.raises(QuestionGenerationUnavailable, match="meaningful changed file"):
         QuestionGenerator().generate(context)
 
 
@@ -292,5 +293,5 @@ def test_refuses_binary_only_context_without_analyzable_evidence() -> None:
         uncertainty_notes=("The binary patch could not be inspected.",),
     )
 
-    with pytest.raises(ValueError, match="analyzable change evidence"):
+    with pytest.raises(QuestionGenerationUnavailable, match="analyzable change evidence"):
         QuestionGenerator().generate(context)

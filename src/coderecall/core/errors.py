@@ -35,5 +35,9 @@ class DiffCollectionFailed(CodeRecallError):
     """Raised when Git diff data cannot be collected or parsed."""
 
 
+class QuestionGenerationUnavailable(CodeRecallError):
+    """Raised when a change lacks evidence for branch-specific questions."""
+
+
 class GitCommandFailed(CodeRecallError):
     """Raised when a Git command cannot be executed successfully."""

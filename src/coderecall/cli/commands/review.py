@@ -15,7 +15,7 @@ from coderecall.analysis import (
     SideEffectDetector,
 )
 from coderecall.cli.terminal_session import TerminalSessionAdapter
-from coderecall.core.errors import CodeRecallError
+from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
 from coderecall.core.types import ChangedFile, DiffSummary, FileStatus, FilteredFile
 from coderecall.git import DiffCollector, GitAdapter
 
@@ -149,7 +149,7 @@ def review_command(
 
     try:
         generated_questions = QuestionGenerator().generate(context)
-    except ValueError:
+    except QuestionGenerationUnavailable:
         typer.echo("Review stopped: changed files contain no analyzable question evidence.")
         return
 
