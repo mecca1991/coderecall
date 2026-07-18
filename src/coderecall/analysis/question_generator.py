@@ -7,8 +7,10 @@ from pathlib import Path
 
 from coderecall.core.types import (
     ChangeContext,
+    ChangedFile,
     ChangedSymbol,
     EvidenceCitation,
+    FileStatus,
     LikelySideEffect,
     Question,
     QuestionCategory,
@@ -53,6 +55,11 @@ class QuestionGenerator:
             )
         )
         primary_reference = self._primary_reference(primary_path, primary_symbol)
+        primary_file = next(
+            changed_file
+            for changed_file in context.changed_files
+            if changed_file.path == primary_path
+        )
         area = self._format_area(primary_path, primary_symbol)
         valid_effects = self._valid_side_effects(context.likely_side_effects, changed_paths)
         changed_test_paths = {
@@ -63,18 +70,45 @@ class QuestionGenerator:
         )
 
         return (
-            Question(
-                id="behavior",
-                category=QuestionCategory.BEHAVIOR,
-                prompt=(
-                    f"What behavior does {area} introduce or modify, and how does it affect "
-                    "the surrounding flow?"
-                ),
-                rationale=f"The branch directly changes {area}.",
-                references=(primary_reference,),
-            ),
+            self._behavior_question(area, primary_reference, primary_file),
             self._failure_question(area, primary_reference, valid_effects),
             self._evidence_question(area, primary_reference, related_tests),
+        )
+
+    @staticmethod
+    def _behavior_question(
+        area: str,
+        primary_reference: EvidenceCitation,
+        primary_file: ChangedFile,
+    ) -> Question:
+        if primary_file.status is FileStatus.DELETED:
+            prompt = (
+                f"What behavior does removing {area} eliminate, and how does that affect the "
+                "surrounding flow?"
+            )
+            rationale = f"The branch removes {area}."
+        elif primary_file.status is FileStatus.ADDED:
+            prompt = (
+                f"What behavior does {area} introduce, and how does it affect the surrounding flow?"
+            )
+            rationale = f"The branch adds {area}."
+        elif primary_file.status is FileStatus.RENAMED:
+            prompt = (
+                f"What behavior, if any, changes when {area} is renamed, and how does the move "
+                "affect the surrounding flow?"
+            )
+            rationale = f"The branch renames {area}."
+        else:
+            prompt = (
+                f"What behavior does {area} modify, and how does it affect the surrounding flow?"
+            )
+            rationale = f"The branch modifies {area}."
+        return Question(
+            id="behavior",
+            category=QuestionCategory.BEHAVIOR,
+            prompt=prompt,
+            rationale=rationale,
+            references=(primary_reference,),
         )
 
     def _failure_question(
@@ -196,11 +230,12 @@ class QuestionGenerator:
                 id="evidence",
                 category=QuestionCategory.EVIDENCE,
                 prompt=(
-                    f"How does {formatted_test} provide evidence that {area} behaves as intended, "
-                    "and which important path remains unverified?"
+                    f"What evidence, if any, does {formatted_test} provide for the behavior of "
+                    f"{area}, and which important path remains unverified?"
                 ),
                 rationale=(
-                    f"The branch changes both {area} and the related test {formatted_test}."
+                    f"The branch changes both {area} and {formatted_test}; their relationship "
+                    "should be established from repository evidence."
                 ),
                 references=(primary_reference, test_reference),
             )

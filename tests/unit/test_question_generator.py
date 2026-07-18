@@ -205,7 +205,9 @@ def test_evidence_question_names_a_changed_test_and_ignores_other_paths() -> Non
 
     assert '"tests/test_orders.py"' in evidence.prompt
     assert "`process_order`" in evidence.prompt
+    assert "if any" in evidence.prompt
     assert "which important path remains unverified" in evidence.prompt
+    assert "related test" not in evidence.rationale
     assert evidence.references == (
         EvidenceCitation(
             kind="symbol",
@@ -249,3 +251,27 @@ def test_prefers_a_non_test_symbol_for_the_primary_changed_area() -> None:
 
     assert all("`process_order`" in question.prompt for question in questions)
     assert all("`test_process_order`" not in question.prompt for question in questions)
+
+
+def test_behavior_question_describes_a_deleted_symbol_as_removed() -> None:
+    source_path = Path("src/legacy.py")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/remove-legacy",
+        base_branch="main",
+        changed_files=(ChangedFile(path=source_path, status=FileStatus.DELETED),),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=source_path,
+                name="legacy_handler",
+                kind="function",
+            ),
+        ),
+    )
+
+    behavior = QuestionGenerator().generate(context)[0]
+
+    assert "removing `legacy_handler`" in behavior.prompt
+    assert "eliminate" in behavior.prompt
+    assert "introduce or modify" not in behavior.prompt
+    assert "removes" in behavior.rationale
