@@ -90,6 +90,10 @@ class SideEffectDetector:
         effects: list[LikelySideEffect] = []
         seen = self._existing_keys(context.likely_side_effects)
         omitted_effects = 0
+        remaining_effect_capacity = max(
+            0,
+            self.max_effects - len(context.likely_side_effects),
+        )
 
         for reference in context.call_sites[: self.max_references]:
             hunk = self._find_hunk(context.diff_hunks, reference)
@@ -100,7 +104,7 @@ class SideEffectDetector:
             if key in seen:
                 continue
             seen.add(key)
-            if len(effects) >= self.max_effects:
+            if len(effects) >= remaining_effect_capacity:
                 omitted_effects += 1
                 continue
             citation = EvidenceCitation(
@@ -110,7 +114,7 @@ class SideEffectDetector:
                 hunk_header=hunk.header if hunk else None,
                 line_start=reference.line_start,
                 line_end=reference.line_start,
-                note="Call-shaped signal observed in changed or nearby hunk evidence.",
+                note=self._evidence_note(hunk, reference.line_start),
             )
             effects.append(
                 LikelySideEffect(
@@ -124,16 +128,20 @@ class SideEffectDetector:
         omitted_references = max(0, len(context.call_sites) - self.max_references)
         if omitted_references:
             noun = "reference" if omitted_references == 1 else "references"
-            uncertainty_notes.append(
+            note = (
                 f"Omitted {omitted_references:,} call {noun} from side-effect detection because "
                 f"the scan limit is {self.max_references:,}."
             )
+            if note not in uncertainty_notes:
+                uncertainty_notes.append(note)
         if omitted_effects:
             noun = "signal" if omitted_effects == 1 else "signals"
-            uncertainty_notes.append(
+            note = (
                 f"Omitted {omitted_effects:,} likely side-effect {noun} because the output limit "
                 f"is {self.max_effects:,}."
             )
+            if note not in uncertainty_notes:
+                uncertainty_notes.append(note)
 
         if not effects and tuple(uncertainty_notes) == context.uncertainty_notes:
             return context
@@ -212,9 +220,10 @@ class SideEffectDetector:
         )
         if language != "python":
             return False
-        line = SideEffectDetector._line_at_new_number(hunk, reference.line_start)
-        if line is None:
+        patch_line = SideEffectDetector._patch_line_at_new_number(hunk, reference.line_start)
+        if patch_line is None:
             return False
+        _marker, line = patch_line
         match = _PYTHON_OPEN_MODE.search(line)
         return match is not None and any(flag in match.group("mode") for flag in "wax+")
 
@@ -234,7 +243,19 @@ class SideEffectDetector:
         return None
 
     @staticmethod
-    def _line_at_new_number(hunk: DiffHunk, target_line: int) -> str | None:
+    def _evidence_note(hunk: DiffHunk | None, line_start: int | None) -> str:
+        if hunk is None or line_start is None:
+            return "Call-shaped signal observed in bounded change evidence."
+        patch_line = SideEffectDetector._patch_line_at_new_number(hunk, line_start)
+        if patch_line is not None and patch_line[0] == "+":
+            return "Call-shaped signal observed on an added line."
+        return "Call-shaped signal observed in nearby context; inference is lower confidence."
+
+    @staticmethod
+    def _patch_line_at_new_number(
+        hunk: DiffHunk,
+        target_line: int,
+    ) -> tuple[str, str] | None:
         new_line = hunk.new_start or 0
         for patch_line in hunk.patch.split("\n")[1:]:
             if not patch_line or patch_line.startswith("\\"):
@@ -242,6 +263,6 @@ class SideEffectDetector:
             if patch_line.startswith("-"):
                 continue
             if new_line == target_line:
-                return patch_line[1:]
+                return patch_line[0], patch_line[1:]
             new_line += 1
         return None

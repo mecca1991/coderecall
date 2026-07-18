@@ -161,3 +161,51 @@ def test_caps_scanned_references_and_reports_omissions() -> None:
         SideEffectKind.DATABASE_WRITE
     ]
     assert any("Omitted 1 call reference" in note for note in detected.uncertainty_notes)
+
+
+def test_effect_limit_is_idempotent_across_repeated_detection() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/many-effects",
+        base_branch="main",
+        call_sites=(
+            CodeReference(Path("db.py"), "call", "session.save", 1),
+            CodeReference(Path("client.py"), "call", "requests.post", 2),
+        ),
+    )
+    detector = SideEffectDetector(max_effects=1)
+
+    first = detector.detect(context)
+    second = detector.detect(first)
+
+    assert second is first
+    assert len(second.likely_side_effects) == 1
+    assert (
+        sum("Omitted 1 likely side-effect signal" in note for note in second.uncertainty_notes) == 1
+    )
+
+
+def test_marks_nearby_context_evidence_as_lower_confidence() -> None:
+    hunk = DiffHunk(
+        file_path=Path("client.py"),
+        header="@@ -1,2 +1,3 @@ def send():",
+        new_start=1,
+        new_lines=3,
+        patch=(
+            "@@ -1,2 +1,3 @@ def send():\n"
+            "+    enabled = True\n"
+            "     requests.post(url)\n"
+            "     return enabled\n"
+        ),
+    )
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/client",
+        base_branch="main",
+        diff_hunks=(hunk,),
+        call_sites=(CodeReference(Path("client.py"), "call", "requests.post", 2),),
+    )
+
+    detected = SideEffectDetector().detect(context)
+
+    assert "lower confidence" in (detected.likely_side_effects[0].evidence[0].note or "")
