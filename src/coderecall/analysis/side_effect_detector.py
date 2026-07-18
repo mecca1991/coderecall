@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import re
+import tokenize
 from dataclasses import replace
 from pathlib import Path
 
@@ -94,6 +96,8 @@ _DESCRIPTIONS = {
 _PYTHON_OPEN_MODE = re.compile(
     r"\bopen\s*\([^)]*(?:,\s*|mode\s*=\s*)(?P<quote>['\"])(?P<mode>[^'\"]+)(?P=quote)"
 )
+_MAX_PATCH_CALL_LINES = 20
+_MAX_PATCH_CALL_CHARS = 4_096
 
 
 class SideEffectDetector:
@@ -290,12 +294,64 @@ class SideEffectDetector:
         )
         if language != "python":
             return False
-        patch_line = SideEffectDetector._patch_line_at_new_number(hunk, reference.line_start)
-        if patch_line is None:
+        call_text = SideEffectDetector._patch_call_at_new_number(hunk, reference.line_start)
+        if call_text is None:
             return False
-        _marker, line = patch_line
-        match = _PYTHON_OPEN_MODE.search(line)
+        match = _PYTHON_OPEN_MODE.search(call_text)
         return match is not None and any(flag in match.group("mode") for flag in "wax+")
+
+    @staticmethod
+    def _patch_call_at_new_number(hunk: DiffHunk, target_line: int) -> str | None:
+        new_line = hunk.new_start or 0
+        call_lines: list[str] = []
+        call_chars = 0
+
+        for patch_line in hunk.patch.split("\n")[1:]:
+            if not patch_line or patch_line.startswith("\\"):
+                continue
+            if patch_line.startswith("-"):
+                continue
+
+            if new_line >= target_line:
+                line = patch_line[1:]
+                added_chars = len(line) + bool(call_lines)
+                if (
+                    len(call_lines) >= _MAX_PATCH_CALL_LINES
+                    or call_chars + added_chars > _MAX_PATCH_CALL_CHARS
+                ):
+                    break
+                call_lines.append(line)
+                call_chars += added_chars
+                call_text = "\n".join(call_lines)
+                if SideEffectDetector._python_call_is_complete(call_text):
+                    return call_text
+
+            new_line += 1
+
+        return "\n".join(call_lines) if call_lines else None
+
+    @staticmethod
+    def _python_call_is_complete(source: str) -> bool:
+        saw_open = False
+        depth = 0
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+            for token in tokens:
+                if not saw_open:
+                    if token.type == tokenize.NAME and token.string == "open":
+                        saw_open = True
+                    continue
+                if token.type != tokenize.OP:
+                    continue
+                if token.string == "(":
+                    depth += 1
+                elif token.string == ")" and depth:
+                    depth -= 1
+                    if depth == 0:
+                        return True
+        except (IndentationError, tokenize.TokenError):
+            return False
+        return False
 
     @staticmethod
     def _find_hunk(

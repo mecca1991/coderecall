@@ -93,6 +93,60 @@ def test_detects_python_open_only_with_a_write_mode() -> None:
     assert effect.evidence[0].hunk_header == write_hunk.header
 
 
+def test_detects_multiline_python_open_only_with_a_write_mode() -> None:
+    write_hunk = DiffHunk(
+        file_path=Path("writer.py"),
+        header="@@ -0,0 +1,5 @@",
+        new_start=1,
+        new_lines=5,
+        patch=(
+            "@@ -0,0 +1,5 @@\n"
+            "+with open(\n"
+            "+    path,\n"
+            "+    \"w\",\n"
+            "+) as output:\n"
+            "+    output.write(payload)\n"
+        ),
+    )
+    read_hunk = DiffHunk(
+        file_path=Path("reader.py"),
+        header="@@ -0,0 +1,4 @@",
+        new_start=1,
+        new_lines=4,
+        patch=(
+            "@@ -0,0 +1,4 @@\n"
+            "+with open(\n"
+            "+    path,\n"
+            "+    mode=\"r\",\n"
+            "+) as source:\n"
+        ),
+    )
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/files",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(Path("writer.py"), FileStatus.MODIFIED, language="python"),
+            ChangedFile(Path("reader.py"), FileStatus.MODIFIED, language="python"),
+        ),
+        diff_hunks=(write_hunk, read_hunk),
+        call_sites=(
+            CodeReference(Path("writer.py"), "call", "open", 1),
+            CodeReference(Path("reader.py"), "call", "open", 1),
+        ),
+    )
+
+    detected = SideEffectDetector().detect(context)
+
+    open_effects = [
+        effect
+        for effect in detected.likely_side_effects
+        if effect.evidence[0].symbol == "open"
+    ]
+    assert len(open_effects) == 1
+    assert open_effects[0].evidence[0].file_path == Path("writer.py")
+
+
 def test_ignores_generic_identifier_substrings_and_non_call_references() -> None:
     context = ChangeContext(
         repo_root=Path("/repo"),
