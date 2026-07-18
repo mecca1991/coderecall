@@ -267,7 +267,13 @@ class ChangeModelBuilder:
                     symbols.append(ChangedSymbol(changed_file.path, node.name, kind, node.lineno))
             elif isinstance(node, ast.Import):
                 imports.extend(
-                    CodeReference(changed_file.path, "import", alias.name, node.lineno)
+                    CodeReference(
+                        changed_file.path,
+                        "import",
+                        alias.name,
+                        node.lineno,
+                        local_name=alias.asname or alias.name.split(".", maxsplit=1)[0],
+                    )
                     for alias in node.names
                 )
             elif isinstance(node, ast.ImportFrom):
@@ -278,6 +284,7 @@ class ChangeModelBuilder:
                         "import",
                         ChangeModelBuilder._python_import_name(module, alias.name),
                         node.lineno,
+                        local_name=alias.asname or alias.name,
                     )
                     for alias in node.names
                 )

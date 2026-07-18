@@ -44,6 +44,16 @@ class AssessmentLabel(StrEnum):
     UNCERTAIN = "Uncertain"
 
 
+class SideEffectKind(StrEnum):
+    """Likely boundary crossed by changed code."""
+
+    DATABASE_WRITE = "database write"
+    TRANSACTION_BOUNDARY = "transaction boundary"
+    NETWORK_CALL = "network call"
+    FILE_WRITE = "file write"
+    MESSAGE_PUBLISH = "message publish"
+
+
 @dataclass(frozen=True)
 class RepositoryContext:
     """The Git repository containing the current CodeRecall invocation."""
@@ -122,6 +132,15 @@ class EvidenceCitation:
 
 
 @dataclass(frozen=True)
+class LikelySideEffect:
+    """Cautious side-effect inference backed by repository evidence."""
+
+    kind: SideEffectKind
+    description: str
+    evidence: tuple[EvidenceCitation, ...]
+
+
+@dataclass(frozen=True)
 class ChangedSymbol:
     """A declaration affected by one or more changed lines."""
 
@@ -139,6 +158,7 @@ class CodeReference:
     kind: str
     name: str
     line_start: int | None = None
+    local_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,7 +176,7 @@ class ChangeContext:
     nearby_imports: tuple[CodeReference, ...] = ()
     call_sites: tuple[CodeReference, ...] = ()
     related_tests: tuple[Path, ...] = ()
-    likely_side_effects: tuple[str, ...] = ()
+    likely_side_effects: tuple[LikelySideEffect, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
 
 

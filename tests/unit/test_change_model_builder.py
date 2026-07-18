@@ -199,6 +199,42 @@ def test_formats_relative_python_imports_without_extra_separator(tmp_path: Path)
     assert [reference.name for reference in context.nearby_imports] == [".helper"]
 
 
+def test_preserves_python_import_bindings_for_call_resolution(tmp_path: Path) -> None:
+    source_path = tmp_path / "src" / "client.py"
+    source_path.parent.mkdir()
+    source_path.write_text(
+        "import requests as r\nfrom requests import post\nr.post('/audit')\npost('/notify')\n"
+    )
+    hunk = DiffHunk(
+        file_path=Path("src/client.py"),
+        header="@@ -0,0 +1,4 @@",
+        new_start=1,
+        new_lines=4,
+        patch=(
+            "@@ -0,0 +1,4 @@\n"
+            "+import requests as r\n"
+            "+from requests import post\n"
+            "+r.post('/audit')\n"
+            "+post('/notify')\n"
+        ),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("src/client.py"), status=FileStatus.ADDED, hunks=(hunk,)),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/client")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [(reference.name, reference.local_name) for reference in context.nearby_imports] == [
+        ("requests", "r"),
+        ("requests.post", "post"),
+    ]
+    assert [reference.name for reference in context.call_sites] == ["r.post", "post"]
+
+
 def test_extracts_typescript_evidence_with_heuristic_uncertainty(tmp_path: Path) -> None:
     source_path = tmp_path / "web" / "payments.ts"
     source_path.parent.mkdir()
