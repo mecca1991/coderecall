@@ -22,6 +22,7 @@ from coderecall.core.types import (
     SideEffectKind,
 )
 from coderecall.evaluation import Evaluator, HeuristicEvaluator
+from coderecall.evaluation.heuristic_evaluator import _Concept
 
 SERVICE_PATH = Path("src/payment_service.ts")
 HANDLER_PATH = Path("src/payment_handler.ts")
@@ -102,6 +103,46 @@ def test_evaluator_protocol_is_satisfied() -> None:
     evaluator: Evaluator = HeuristicEvaluator()
 
     assert evaluator is not None
+
+
+def test_side_effect_concept_label_uses_the_enum_string_value() -> None:
+    citation = EvidenceCitation(kind="call", file_path=SERVICE_PATH)
+    concept = _Concept(citation, ("network call",), SideEffectKind.NETWORK_CALL)
+
+    assert concept.label == SideEffectKind.NETWORK_CALL.value
+    assert type(concept.label) is str
+
+
+@pytest.mark.parametrize(
+    ("raw_text", "expected_label"),
+    (
+        ("The charge may need retry recovery.", AssessmentLabel.STRONG),
+        ("The recharged request may need retry recovery.", AssessmentLabel.UNCERTAIN),
+    ),
+)
+def test_concept_matching_preserves_whole_phrase_boundaries(
+    raw_text: str,
+    expected_label: AssessmentLabel,
+) -> None:
+    citation = EvidenceCitation(kind="call", file_path=SERVICE_PATH, symbol="charge")
+    context = replace(
+        payment_context(),
+        likely_side_effects=(
+            LikelySideEffect(
+                SideEffectKind.NETWORK_CALL,
+                "The change likely makes an external network call.",
+                (citation,),
+            ),
+        ),
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        context,
+        failure_question(citation),
+        Answer(question_id="failure", raw_text=raw_text),
+    )
+
+    assert assessment.label is expected_label
 
 
 def test_strong_failure_answer_connects_every_boundary_to_recovery() -> None:

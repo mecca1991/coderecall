@@ -102,7 +102,11 @@ class _Concept:
 
     @property
     def label(self) -> str:
-        return self.citation.symbol or self.effect or self.citation.file_path.as_posix()
+        if self.citation.symbol is not None:
+            return self.citation.symbol
+        if self.effect is not None:
+            return self.effect.value
+        return self.citation.file_path.as_posix()
 
 
 class HeuristicEvaluator:
@@ -399,7 +403,8 @@ class HeuristicEvaluator:
 
     @staticmethod
     def _matches(text: str, concept: _Concept) -> bool:
-        return any(re.search(rf"\b{re.escape(phrase)}\b", text) for phrase in concept.phrases)
+        padded_text = f" {text} "
+        return any(f" {phrase} " in padded_text for phrase in concept.phrases)
 
     @staticmethod
     def _same_source(first: EvidenceCitation, second: EvidenceCitation) -> bool:
