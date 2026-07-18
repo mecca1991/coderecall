@@ -199,6 +199,18 @@ def test_generic_path_token_cannot_satisfy_failure_evidence_groups() -> None:
     assert assessment.label is AssessmentLabel.UNCERTAIN
 
 
+def test_shared_file_path_cannot_satisfy_distinct_failure_evidence_groups() -> None:
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        failure_question(),
+        Answer(question_id="failure", raw_text="src/payment_service.ts retry"),
+    )
+
+    assert assessment.label is AssessmentLabel.PARTIAL
+    assert any("processor.charge" in gap for gap in assessment.gaps)
+    assert any("database.transaction" in gap for gap in assessment.gaps)
+
+
 def test_secondary_symbol_cannot_stand_in_for_the_primary_behavior_area() -> None:
     question = Question(
         id="behavior",

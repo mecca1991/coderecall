@@ -338,8 +338,7 @@ class HeuristicEvaluator:
     ) -> _Concept:
         effect = effect or self._effect_for(context, citation)
         values = [
-            citation.symbol or "",
-            citation.file_path.as_posix(),
+            citation.symbol or citation.file_path.as_posix(),
             effect.value if effect else "",
         ]
         if effect in _EXTERNAL_EFFECTS:
