@@ -43,6 +43,17 @@ Answers may span multiple lines. A blank line submits the current answer, while 
 immediately records an explicit skip. End-of-file safely submits any partial answer and skips the
 remaining questions.
 
+In an interactive terminal, CodeRecall uses restrained styling for headings, question categories,
+warnings, and answer status. Every label and message remains present without color, and redirected
+output automatically falls back to unstyled text. To explicitly disable ANSI styling and terminal
+detection, use:
+
+```bash
+coderecall review --base main --plain
+```
+
+Styled and plain sessions use the same wording and section order, so color never carries meaning.
+
 The complete workflow will eventually continue by:
 
 1. Evaluating answers against repository evidence.
