@@ -480,6 +480,60 @@ def test_does_not_follow_source_paths_outside_repository(tmp_path: Path) -> None
     assert any("outside the repository" in note for note in context.uncertainty_notes)
 
 
+def test_does_not_parse_in_repository_symlink_targets(tmp_path: Path) -> None:
+    target_path = tmp_path / "target.py"
+    target_path.write_text("def unrelated():\n    return private_call()\n")
+    (tmp_path / "linked.py").symlink_to(target_path.name)
+    hunk = DiffHunk(
+        file_path=Path("linked.py"),
+        header="@@ -0,0 +1 @@ def tracked_symbol():",
+        new_start=1,
+        new_lines=1,
+        patch="@@ -0,0 +1 @@ def tracked_symbol():\n+target.py\n",
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("linked.py"), status=FileStatus.ADDED, hunks=(hunk,)),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/symlink")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [symbol.name for symbol in context.changed_symbols] == ["tracked_symbol"]
+    assert all(symbol.name != "unrelated" for symbol in context.changed_symbols)
+    assert any("symlink" in note for note in context.uncertainty_notes)
+
+
+def test_invalid_python_encoding_falls_back_to_hunk_context(tmp_path: Path) -> None:
+    source_path = tmp_path / "broken.py"
+    source_path.write_bytes(b"\xff\n")
+    hunk = DiffHunk(
+        file_path=Path("broken.py"),
+        header="@@ -1,2 +1,2 @@ def broken():",
+        old_start=1,
+        old_lines=2,
+        new_start=1,
+        new_lines=2,
+        patch=(
+            '@@ -1,2 +1,2 @@ def broken():\n def broken():\n-    return "old"\n+    return "new"\n'
+        ),
+    )
+    diff = DiffCollection(
+        merge_base="abc123",
+        changed_files=(
+            ChangedFile(path=Path("broken.py"), status=FileStatus.MODIFIED, hunks=(hunk,)),
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/encoding")
+
+    context = ChangeModelBuilder().build(repository, "main", diff)
+
+    assert [symbol.name for symbol in context.changed_symbols] == ["broken"]
+    assert any("Could not parse" in note for note in context.uncertainty_notes)
+
+
 def test_caps_retained_evidence_per_file(tmp_path: Path) -> None:
     source_path = tmp_path / "src" / "imports.py"
     source_path.parent.mkdir()

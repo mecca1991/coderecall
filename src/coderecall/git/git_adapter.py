@@ -51,6 +51,7 @@ class RevisionFile:
 
     content: bytes | None
     size: int
+    kind: Literal["file", "symlink", "other"] = "file"
 
 
 class _PrefixedReader:
@@ -225,19 +226,30 @@ class GitAdapter:
 
         if max_bytes < 1:
             raise ValueError("max_bytes must be positive")
-        object_name = f"{revision}:{path.as_posix()}"
-        object_result = self._run(
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            object_name,
+        tree_result = self._run(
+            "--literal-pathspecs",
+            "ls-tree",
+            "-z",
+            "--full-tree",
+            revision,
+            "--",
+            path.as_posix(),
             cwd=repository.root,
         )
-        if object_result.returncode != 0:
+        if tree_result.returncode != 0:
             return None
-        object_id = object_result.stdout.strip()
-        if not object_id:
+        entry = tree_result.stdout.split("\0", 1)[0]
+        if not entry or "\t" not in entry:
             return None
+        metadata, returned_path = entry.split("\t", 1)
+        metadata_parts = metadata.split()
+        if len(metadata_parts) != 3 or returned_path != path.as_posix():
+            return None
+        mode, _object_type, object_id = metadata_parts
+        if mode == "120000":
+            return RevisionFile(content=None, size=0, kind="symlink")
+        if not mode.startswith("100"):
+            return RevisionFile(content=None, size=0, kind="other")
 
         size_result = self._run("cat-file", "-s", object_id, cwd=repository.root)
         if size_result.returncode != 0:

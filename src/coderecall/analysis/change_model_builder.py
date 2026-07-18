@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import stat
 from dataclasses import replace
 from pathlib import Path
 
@@ -191,6 +192,10 @@ class ChangeModelBuilder:
             revision_file = None
         if revision_file is None:
             return None, f"Could not read source file {self._format_path(relative_path)}."
+        if revision_file.kind == "symlink":
+            return None, f"Skipped symlink source file {self._format_path(relative_path)}."
+        if revision_file.kind == "other":
+            return None, f"Skipped non-regular source file {self._format_path(relative_path)}."
         if revision_file.content is None:
             return (
                 None,
@@ -205,8 +210,10 @@ class ChangeModelBuilder:
         relative_path: Path,
     ) -> tuple[str | None, str | None]:
         resolved_root = root.resolve()
+        candidate_path = resolved_root / relative_path
         try:
-            source_path = (resolved_root / relative_path).resolve()
+            file_mode = candidate_path.lstat().st_mode
+            source_path = candidate_path.resolve()
         except (OSError, RuntimeError):
             return None, f"Could not resolve source file {self._format_path(relative_path)}."
         if not source_path.is_relative_to(resolved_root):
@@ -214,6 +221,10 @@ class ChangeModelBuilder:
                 None,
                 f"Skipped source outside the repository: {self._format_path(relative_path)}.",
             )
+        if stat.S_ISLNK(file_mode):
+            return None, f"Skipped symlink source file {self._format_path(relative_path)}."
+        if not stat.S_ISREG(file_mode):
+            return None, f"Skipped non-regular source file {self._format_path(relative_path)}."
 
         try:
             with source_path.open("rb") as source_file:

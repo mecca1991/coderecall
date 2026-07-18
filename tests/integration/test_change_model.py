@@ -91,3 +91,25 @@ def test_reads_committed_snapshot_when_worktree_is_dirty(tmp_path: Path) -> None
 
     assert [symbol.name for symbol in context.changed_symbols] == ["committed"]
     assert [reference.name for reference in context.call_sites] == ["target_call"]
+
+
+def test_does_not_parse_tracked_symlink_target_from_revision(tmp_path: Path) -> None:
+    run_git(tmp_path, "init", "--quiet")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "main")
+    run_git(tmp_path, "config", "user.name", "CodeRecall Tests")
+    run_git(tmp_path, "config", "user.email", "tests@coderecall.local")
+    (tmp_path / "target.py").write_text("def unrelated():\n    return private_call()\n")
+    commit_all(tmp_path, "Add target source")
+    run_git(tmp_path, "checkout", "--quiet", "-b", "feature/symlink")
+    (tmp_path / "linked.py").symlink_to("target.py")
+    commit_all(tmp_path, "Add tracked symlink")
+
+    git = GitAdapter(tmp_path)
+    repository = git.detect_repository()
+    diff = DiffCollector(git, file_filter=FileFilter()).collect(repository, "main")
+
+    context = ChangeModelBuilder(source_reader=git).build(repository, "main", diff)
+
+    assert context.changed_symbols == ()
+    assert context.call_sites == ()
+    assert any("symlink" in note for note in context.uncertainty_notes)
