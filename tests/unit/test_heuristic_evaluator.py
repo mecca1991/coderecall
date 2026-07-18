@@ -234,6 +234,21 @@ def test_explicit_local_rollback_misconception_is_a_gap() -> None:
     assert any("rollback" in gap.lower() and "external" in gap.lower() for gap in assessment.gaps)
 
 
+def test_unrelated_negation_does_not_hide_rollback_misconception() -> None:
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        failure_question(),
+        Answer(
+            question_id="failure",
+            raw_text=(
+                "database.transaction rollback undoes processor.charge, so retry is not needed."
+            ),
+        ),
+    )
+
+    assert assessment.label is AssessmentLabel.GAP_FOUND
+
+
 @pytest.mark.parametrize(
     "rollback_explanation",
     (

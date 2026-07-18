@@ -21,7 +21,7 @@ from coderecall.core.types import (
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_WORD = re.compile(r"[^a-z0-9]+")
 _CLAUSE_BOUNDARY = re.compile(r"[.!?;\n]+")
-_NEGATIONS = frozenset({"cannot", "cant", "never", "no", "not", "without", "wont"})
+_RELATION_NEGATION = re.compile(r"\b(?:cannot|cant|never|no|not(?!\s+only\b)|without|wont)\b")
 _RECOVERY_TERMS = (
     "partial success",
     "retry",
@@ -352,8 +352,6 @@ class HeuristicEvaluator:
             return False
 
         for clause in _CLAUSE_BOUNDARY.split(text):
-            if set(clause.split()) & _NEGATIONS:
-                continue
             for concept in external:
                 for phrase in concept.phrases:
                     escaped = re.escape(phrase)
@@ -365,7 +363,10 @@ class HeuristicEvaluator:
                         rf"\b{escaped}\b.{{0,30}}\b(?:is|gets|got|was|will be|would be)\s+"
                         rf"{_PASSIVE_UNDO}\b.{{0,30}}{_ROLLBACK.pattern}"
                     )
-                    if direct_claim.search(clause) or passive_claim.search(clause):
+                    direct_match = direct_claim.search(clause)
+                    if direct_match and not _RELATION_NEGATION.search(direct_match.group()):
+                        return True
+                    if passive_claim.search(clause):
                         return True
         return False
 
