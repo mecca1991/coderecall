@@ -39,6 +39,13 @@ QUESTIONS = (
     make_question("evidence", QuestionCategory.EVIDENCE),
 )
 
+FOLLOW_UP = Question(
+    id="failure-follow-up",
+    category=QuestionCategory.FOLLOW_UP,
+    prompt="The transaction cannot reverse the charge. How should reconciliation work?",
+    rationale="A grounded failure gap remains.",
+)
+
 
 def test_capture_preserves_multiline_text_and_normalizes_terminal_line_endings() -> None:
     terminal = TerminalSessionAdapter(
@@ -128,6 +135,60 @@ def test_injected_clock_records_stable_utc_timestamps_in_question_order() -> Non
         datetime(2026, 7, 18, 10, 2, tzinfo=UTC),
     )
     assert tuple(answer.skipped for answer in answers) == (False, True, False)
+
+
+def test_capture_follow_up_records_an_answer_under_a_distinct_heading() -> None:
+    output = StringIO()
+    terminal = TerminalSessionAdapter(
+        input_stream=StringIO("Use an idempotency record and reconcile pending charges.\n\n"),
+        output_stream=output,
+        plain=True,
+    )
+
+    answer = terminal.capture_follow_up(FOLLOW_UP)
+
+    assert answer.question_id == "failure-follow-up"
+    assert answer.raw_text == "Use an idempotency record and reconcile pending charges."
+    assert answer.skipped is False
+    assert output.getvalue() == (
+        "\n"
+        "Follow-up\n"
+        "The transaction cannot reverse the charge. How should reconciliation work?\n"
+        "Answer:\n"
+        "Answer recorded.\n"
+    )
+
+
+def test_capture_follow_up_preserves_an_explicit_skip() -> None:
+    output = StringIO()
+    terminal = TerminalSessionAdapter(
+        input_stream=StringIO("\n"),
+        output_stream=output,
+        plain=True,
+    )
+
+    answer = terminal.capture_follow_up(FOLLOW_UP)
+
+    assert answer.question_id == "failure-follow-up"
+    assert answer.raw_text == ""
+    assert answer.skipped is True
+    assert output.getvalue().endswith("Answer:\nSkipped.\n")
+
+
+def test_capture_follow_up_preserves_an_eof_skip() -> None:
+    output = StringIO()
+    terminal = TerminalSessionAdapter(
+        input_stream=StringIO(""),
+        output_stream=output,
+        plain=True,
+    )
+
+    answer = terminal.capture_follow_up(FOLLOW_UP)
+
+    assert answer.question_id == "failure-follow-up"
+    assert answer.raw_text == ""
+    assert answer.skipped is True
+    assert output.getvalue().endswith("Answer:\nSkipped.\n")
 
 
 def test_plain_session_has_stable_readable_multiline_output() -> None:

@@ -15,6 +15,7 @@ from coderecall.analysis import (
 )
 from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
+from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
 
 
@@ -94,4 +95,19 @@ def review_command(
 
     selected_questions = generated_questions[:questions]
     answers = terminal.capture_answers(selected_questions)
-    terminal.render_answer_counts(answers)
+    evaluator = HeuristicEvaluator()
+    assessments = tuple(
+        evaluator.evaluate(context, question, answer)
+        for question, answer in zip(selected_questions, answers, strict=True)
+    )
+    follow_up = FollowUpSelector().select(
+        context,
+        selected_questions,
+        assessments,
+        enabled=not no_follow_up,
+    )
+    all_answers = list(answers)
+    if follow_up is not None:
+        all_answers.append(terminal.capture_follow_up(follow_up.question))
+
+    terminal.render_answer_counts(all_answers)
