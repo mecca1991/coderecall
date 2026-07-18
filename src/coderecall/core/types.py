@@ -181,6 +181,17 @@ class ChangeContext:
 
 
 @dataclass(frozen=True)
+class DiffSummary:
+    """Concise, evidence-bounded overview of a repository change."""
+
+    purpose: str
+    relevant_files: tuple[Path, ...] = ()
+    tests: tuple[Path, ...] = ()
+    side_effects: tuple[LikelySideEffect, ...] = ()
+    uncertainty_notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Question:
     """A generated learning prompt."""
 
