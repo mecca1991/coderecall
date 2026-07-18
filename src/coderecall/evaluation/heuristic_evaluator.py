@@ -319,7 +319,7 @@ class HeuristicEvaluator:
                     line_start=reference.line_start,
                 ),
             )
-            for reference in context.call_sites + context.nearby_imports
+            for reference in context.call_sites
             if reference.file_path in changed_paths
         )
         concepts.extend(
