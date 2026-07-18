@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from coderecall.core.errors import QuestionGenerationUnavailable
 from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
@@ -29,11 +30,15 @@ class QuestionGenerator:
 
     def generate(self, context: ChangeContext) -> tuple[Question, ...]:
         if not context.changed_files:
-            raise ValueError("Question generation requires at least one meaningful changed file.")
+            raise QuestionGenerationUnavailable(
+                "Question generation requires at least one meaningful changed file."
+            )
 
         analysis_files = self._analyzable_files(context)
         if not analysis_files:
-            raise ValueError("Question generation requires analyzable change evidence.")
+            raise QuestionGenerationUnavailable(
+                "Question generation requires analyzable change evidence."
+            )
 
         changed_paths = {changed_file.path for changed_file in analysis_files}
         non_test_paths = {
