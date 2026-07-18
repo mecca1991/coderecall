@@ -183,11 +183,6 @@ class TerminalSessionAdapter:
         lines: list[str] = []
         while True:
             line = self._input.readline()
-            if line == "":
-                answer = self._answer(question, lines)
-                self._render_answer_status(answer)
-                return answer
-
             content = self._without_terminal_line_ending(line)
             if content == "":
                 answer = self._answer(question, lines)
