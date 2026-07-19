@@ -17,6 +17,14 @@ from coderecall.core.types import (
 
 runner = CliRunner()
 
+PRIVACY_DISCLOSURE = (
+    "Privacy\n"
+    "Model mode: Local heuristic (no remote model)\n"
+    "Repository content, answers, and reports stay on this machine.\n"
+    "CodeRecall sends no telemetry and makes no network requests.\n"
+    "\n"
+)
+
 
 def create_python_feature_repository(directory: Path) -> None:
     subprocess.run(["git", "init", "--quiet"], cwd=directory, check=True)
@@ -54,6 +62,7 @@ def test_root_help_lists_commands() -> None:
     assert "review" in result.output
     assert "install-hook" in result.output
     assert "init" in result.output
+    assert "Privacy" not in result.output
 
 
 def test_review_help_lists_mvp_options() -> None:
@@ -66,6 +75,7 @@ def test_review_help_lists_mvp_options() -> None:
     assert "--no-follow-up" in result.output
     assert "--include-uncomm" in result.output
     assert "--plain" in result.output
+    assert "Privacy" not in result.output
 
 
 def test_version_option() -> None:
@@ -73,6 +83,7 @@ def test_version_option() -> None:
 
     assert result.exit_code == 0
     assert "coderecall 0.1.0" in result.output
+    assert "Privacy" not in result.output
 
 
 def test_review_reports_repository_context(
@@ -130,6 +141,8 @@ def test_review_reports_repository_context(
     result = runner.invoke(app, ["review"], input="")
 
     assert result.exit_code == 0
+    assert result.output.startswith(PRIVACY_DISCLOSURE)
+    assert result.output.index("Privacy") < result.output.index("CodeRecall review")
     assert "CodeRecall review" in result.output
     assert f'Repository: "{tmp_path}"' in result.output
     assert "Branch: feature/cli-context -> main" in result.output
@@ -185,6 +198,7 @@ def test_review_writes_custom_report_relative_to_invocation_directory(
     assert "# CodeRecall Report" in report
     assert "Branch: feature/complete-order" in report
     assert "Base branch: main" in report
+    assert "Model mode: Local heuristic (no remote model)" in report
     assert "> It changes process_order to return complete." in report
     assert "## Review Talking Points\n\n- Explain the change:" in report
     assert "No review talking points generated." not in report
@@ -299,6 +313,10 @@ def test_review_fails_clearly_outside_repository(
     result = runner.invoke(app, ["review"])
 
     assert result.exit_code == 1
+    assert result.output.startswith(PRIVACY_DISCLOSURE)
+    assert result.output.index("Privacy") < result.output.index(
+        "could not find a Git repository"
+    )
     assert "could not find a Git repository" in result.output
     assert "Run this command inside a Git working tree." in result.output
     assert "git rev-parse --show-toplevel" in result.output
