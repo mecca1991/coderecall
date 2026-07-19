@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from pathlib import Path
 
 from coderecall.core.errors import ReportWriteFailed
 from coderecall.core.types import Assessment, EvidenceCitation, FollowUp, Report
+from coderecall.reporting.formatting import inline_code
 
 
 class MarkdownReportWriter:
@@ -177,7 +177,4 @@ class MarkdownReportWriter:
 
     @staticmethod
     def _inline_code(value: str) -> str:
-        longest_run = max((len(run) for run in re.findall(r"`+", value)), default=0)
-        delimiter = "`" * max(1, longest_run + 1)
-        padding = " " if value.startswith("`") or value.endswith("`") else ""
-        return f"{delimiter}{padding}{value}{padding}{delimiter}"
+        return inline_code(value)
