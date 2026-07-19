@@ -142,8 +142,12 @@ def test_review_reports_repository_context(
     assert "End of input: 2 remaining questions skipped." in result.output
     assert "Session complete" in result.output
     assert "Answers: 0 answered, 3 skipped" in result.output
-    assert (tmp_path / "coderecall-report.md").is_file()
+    report_path = tmp_path / "coderecall-report.md"
+    assert report_path.is_file()
     assert f'Report written: "{tmp_path / "coderecall-report.md"}"' in result.output
+    report = report_path.read_text(encoding="utf-8")
+    assert "## Review Talking Points\n\n- Explain the change:" in report
+    assert "No review talking points generated." not in report
 
 
 def test_review_writes_custom_report_relative_to_invocation_directory(
@@ -182,7 +186,9 @@ def test_review_writes_custom_report_relative_to_invocation_directory(
     assert "Branch: feature/complete-order" in report
     assert "Base branch: main" in report
     assert "> It changes process_order to return complete." in report
-    assert report.endswith("## Review Talking Points\n\n- No review talking points generated.\n")
+    assert "## Review Talking Points\n\n- Explain the change:" in report
+    assert "No review talking points generated." not in report
+    assert "Explain the change:" not in result.output
 
 
 def test_review_preserves_session_output_when_report_write_fails(

@@ -18,7 +18,11 @@ from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
 from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
-from coderecall.reporting import MarkdownReportWriter, ReportBuilder
+from coderecall.reporting import (
+    MarkdownReportWriter,
+    ReportBuilder,
+    ReviewTalkingPointGenerator,
+)
 
 
 def _exit_with_error(error: CodeRecallError) -> None:
@@ -102,6 +106,11 @@ def review_command(
         evaluator.evaluate(context, question, answer)
         for question, answer in zip(selected_questions, answers, strict=True)
     )
+    review_talking_points = ReviewTalkingPointGenerator().generate(
+        summary,
+        selected_questions,
+        assessments,
+    )
     follow_up = FollowUpSelector().select(
         context,
         selected_questions,
@@ -123,6 +132,7 @@ def review_command(
         answers,
         assessments,
         follow_up=follow_up,
+        review_talking_points=review_talking_points,
     )
     try:
         written_path = MarkdownReportWriter().write(built_report, report_path)
