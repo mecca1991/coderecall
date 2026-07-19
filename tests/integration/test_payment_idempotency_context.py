@@ -200,6 +200,11 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
 
     assert result.exit_code == 0
     assert result.output.startswith(
+        "Privacy\n"
+        "Model mode: Local heuristic (no remote model)\n"
+        "Repository content, answers, and reports stay on this machine.\n"
+        "CodeRecall sends no telemetry and makes no network requests.\n"
+        "\n"
         "CodeRecall review\n"
         f'Repository: "{tmp_path}"\n'
         "Branch: feature/payment-idempotency -> main\n"

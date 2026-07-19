@@ -314,9 +314,7 @@ def test_review_fails_clearly_outside_repository(
 
     assert result.exit_code == 1
     assert result.output.startswith(PRIVACY_DISCLOSURE)
-    assert result.output.index("Privacy") < result.output.index(
-        "could not find a Git repository"
-    )
+    assert result.output.index("Privacy") < result.output.index("could not find a Git repository")
     assert "could not find a Git repository" in result.output
     assert "Run this command inside a Git working tree." in result.output
     assert "git rev-parse --show-toplevel" in result.output
