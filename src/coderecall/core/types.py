@@ -51,6 +51,12 @@ class AssessmentLabel(StrEnum):
     UNCERTAIN = "Uncertain"
 
 
+class ModelMode(StrEnum):
+    """Evaluation mode used for a CodeRecall review session."""
+
+    LOCAL_HEURISTIC = "Local heuristic (no remote model)"
+
+
 class SideEffectKind(StrEnum):
     """Likely boundary crossed by changed code."""
 

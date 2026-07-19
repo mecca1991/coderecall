@@ -17,6 +17,7 @@ from coderecall.core.types import (
     FilteredFile,
     FilterReason,
     LikelySideEffect,
+    ModelMode,
     Question,
     QuestionCategory,
     RepositoryContext,
@@ -45,6 +46,21 @@ FOLLOW_UP = Question(
     prompt="The transaction cannot reverse the charge. How should reconciliation work?",
     rationale="A grounded failure gap remains.",
 )
+
+
+def test_privacy_disclosure_has_exact_plain_copy() -> None:
+    output = StringIO()
+    terminal = TerminalSessionAdapter(output_stream=output, plain=True)
+
+    terminal.render_privacy_disclosure(ModelMode.LOCAL_HEURISTIC)
+
+    assert output.getvalue() == (
+        "Privacy\n"
+        "Model mode: Local heuristic (no remote model)\n"
+        "Repository content, answers, and reports stay on this machine.\n"
+        "CodeRecall sends no telemetry and makes no network requests.\n"
+        "\n"
+    )
 
 
 def test_capture_preserves_multiline_text_and_normalizes_terminal_line_endings() -> None:
@@ -328,9 +344,11 @@ def test_forced_styling_adds_ansi_without_changing_semantic_output() -> None:
     )
     summary = DiffSummary(purpose="Explain the visible change.")
 
+    plain_terminal.render_privacy_disclosure(ModelMode.LOCAL_HEURISTIC)
     plain_terminal.render_diff_summary(summary)
     plain_answers = plain_terminal.capture_answers(QUESTIONS[:1])
     plain_terminal.render_answer_counts(plain_answers)
+    styled_terminal.render_privacy_disclosure(ModelMode.LOCAL_HEURISTIC)
     styled_terminal.render_diff_summary(summary)
     styled_answers = styled_terminal.capture_answers(QUESTIONS[:1])
     styled_terminal.render_answer_counts(styled_answers)

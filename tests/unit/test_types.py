@@ -14,11 +14,18 @@ from coderecall.core.types import (
     EvidenceCitation,
     FileStatus,
     LikelySideEffect,
+    ModelMode,
     Question,
     QuestionCategory,
     Report,
     SideEffectKind,
 )
+
+
+def test_model_mode_contract_is_fixed_to_local_heuristic() -> None:
+    assert [(mode.name, mode.value) for mode in ModelMode] == [
+        ("LOCAL_HEURISTIC", "Local heuristic (no remote model)"),
+    ]
 
 
 def test_assessment_label_contract() -> None:

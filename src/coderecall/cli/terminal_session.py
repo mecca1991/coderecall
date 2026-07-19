@@ -19,6 +19,7 @@ from coderecall.core.types import (
     DiffSummary,
     FileStatus,
     FilteredFile,
+    ModelMode,
     Question,
     RepositoryContext,
 )
@@ -52,6 +53,15 @@ class TerminalSessionAdapter:
             highlight=False,
             markup=False,
         )
+
+    def render_privacy_disclosure(self, model_mode: ModelMode) -> None:
+        """Disclose local review privacy behavior before repository inspection."""
+
+        self._print("Privacy", style=_HEADING_STYLE)
+        self._print(f"Model mode: {model_mode.value}")
+        self._print("Repository content, answers, and reports stay on this machine.")
+        self._print("CodeRecall sends no telemetry and makes no network requests.")
+        self._print()
 
     def render_repository_context(
         self,

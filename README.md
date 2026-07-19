@@ -59,6 +59,20 @@ coderecall review --base main --plain
 
 Styled and plain sessions use the same wording and section order, so color never carries meaning.
 
+### Privacy and Model Mode
+
+The MVP uses deterministic local heuristic evaluation. Every executed `coderecall review` starts
+by identifying the model mode as `Local heuristic (no remote model)` before CodeRecall inspects the
+Git repository. There is no remote model provider, model selection option, or consent prompt in the
+local-only MVP.
+
+Repository content, answers, and reports stay on the machine running CodeRecall. The CLI sends no
+telemetry, makes no network requests, performs no automatic uploads, and never shares a completed
+report. Reports are ordinary local Markdown files controlled by the developer.
+
+If a remote model mode is added in the future, it must require explicit user opt-in before a remote
+provider is constructed or any repository content is sent outside the machine.
+
 ### Local Report
 
 Every completed review session overwrites `coderecall-report.md` in the directory where the
@@ -78,8 +92,7 @@ Choose a different local path with `--report`; missing parent directories are cr
 coderecall review --base main --report .coderecall/reports/latest.md
 ```
 
-Reports are written as UTF-8 Markdown and remain on the local filesystem. CodeRecall does not
-upload or share them.
+Reports are written as UTF-8 Markdown and remain on the local filesystem.
 
 ### Project Configuration
 

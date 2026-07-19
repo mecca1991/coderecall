@@ -18,6 +18,7 @@ from coderecall.cli.error_rendering import exit_with_error
 from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.config import ConfigLoader, resolve_review_options
 from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
+from coderecall.core.types import ModelMode
 from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
 from coderecall.reporting import (
@@ -63,6 +64,9 @@ def review_command(
 ) -> None:
     """Run an understanding check against the current Git branch."""
 
+    model_mode = ModelMode.LOCAL_HEURISTIC
+    terminal = TerminalSessionAdapter(plain=plain)
+    terminal.render_privacy_disclosure(model_mode)
     invocation_directory = Path.cwd().resolve()
     git = GitAdapter(invocation_directory)
     try:
@@ -92,7 +96,6 @@ def review_command(
     context = ChangeModelBuilder(source_reader=git).build(repository, selected_base, diff)
     context = SideEffectDetector().detect(context)
     summary = DiffSummaryService().summarize(context)
-    terminal = TerminalSessionAdapter(plain=plain)
 
     terminal.render_repository_context(repository, selected_base, diff)
     terminal.render_diff_summary(summary)
@@ -138,6 +141,7 @@ def review_command(
         selected_questions,
         answers,
         assessments,
+        model_mode=model_mode,
         follow_up=follow_up,
         review_talking_points=review_talking_points,
     )

@@ -48,6 +48,7 @@ def test_init_writes_exact_starter_at_repository_root_from_nested_directory(
     assert result.exit_code == 0
     assert target.read_text(encoding="utf-8") == STARTER_CONFIG
     assert f'Created CodeRecall configuration: "{target}"' in result.output
+    assert "Privacy" not in result.output
     assert not (nested / ".coderecall.yml").exists()
 
 
