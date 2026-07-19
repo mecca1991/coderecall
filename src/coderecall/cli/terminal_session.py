@@ -132,6 +132,11 @@ class TerminalSessionAdapter:
         self._print("Session complete", style=_HEADING_STYLE)
         self._print(f"Answers: {answered_count} answered, {skipped_count} skipped")
 
+    def render_report_written(self, path: Path) -> None:
+        """Render the resolved path of a successfully written local report."""
+
+        self._print(f"Report written: {self._format_path(path)}", style=_STATUS_STYLE)
+
     def capture_answers(self, questions: Sequence[Question]) -> tuple[Answer, ...]:
         """Capture one answer per question until completion or end-of-file."""
 

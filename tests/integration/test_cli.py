@@ -142,6 +142,84 @@ def test_review_reports_repository_context(
     assert "End of input: 2 remaining questions skipped." in result.output
     assert "Session complete" in result.output
     assert "Answers: 0 answered, 3 skipped" in result.output
+    assert (tmp_path / "coderecall-report.md").is_file()
+    assert f'Report written: "{tmp_path / "coderecall-report.md"}"' in result.output
+
+
+def test_review_writes_custom_report_relative_to_invocation_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_python_feature_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "artifacts" / "understanding.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "review",
+            "--base",
+            "main",
+            "--questions",
+            "1",
+            "--no-follow-up",
+            "--report",
+            "artifacts/understanding.md",
+            "--plain",
+        ],
+        input="It changes process_order to return complete.\n\n",
+    )
+
+    assert result.exit_code == 0
+    assert target.is_file()
+    assert not (tmp_path / "coderecall-report.md").exists()
+    assert f'Report written: "{target}"' in result.output
+    assert result.output.index("Answers: 1 answered, 0 skipped") < result.output.index(
+        "Report written:"
+    )
+    report = target.read_text(encoding="utf-8")
+    assert "# CodeRecall Report" in report
+    assert "Branch: feature/complete-order" in report
+    assert "Base branch: main" in report
+    assert "> It changes process_order to return complete." in report
+    assert report.endswith("## Review Talking Points\n\n- No review talking points generated.\n")
+
+
+def test_review_preserves_session_output_when_report_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_python_feature_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    blocked_parent = tmp_path / "blocked"
+    blocked_parent.write_text("not a directory", encoding="utf-8")
+    target = blocked_parent / "report.md"
+
+    result = runner.invoke(
+        app,
+        [
+            "review",
+            "--base",
+            "main",
+            "--questions",
+            "1",
+            "--no-follow-up",
+            "--report",
+            str(target),
+            "--plain",
+        ],
+        input="Answer.\n\n",
+    )
+
+    assert result.exit_code == 1
+    assert "CodeRecall review" in result.output
+    assert "Change summary" in result.output
+    assert "Question 1/1" in result.output
+    assert "Session complete\nAnswers: 1 answered, 0 skipped" in result.output
+    assert f'Could not write the local report to "{target}"' in result.output
+    assert "--report <path>" in result.output
+    assert "Report written:" not in result.output
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_review_reports_filtered_files_and_reasons(
@@ -218,6 +296,7 @@ def test_review_fails_clearly_outside_repository(
     assert "could not find a Git repository" in result.output
     assert "Run this command inside a Git working tree." in result.output
     assert "git rev-parse --show-toplevel" in result.output
+    assert not (tmp_path / "coderecall-report.md").exists()
 
 
 def test_review_reports_missing_base_branch(
@@ -354,6 +433,7 @@ def test_review_stops_before_questions_when_every_change_is_filtered(
     assert "Review stopped\nNo meaningful files remain after filtering." in result.output
     assert "Questions" not in result.output
     assert "A blank line submits" not in result.output
+    assert not (tmp_path / "coderecall-report.md").exists()
 
 
 @pytest.mark.parametrize(
@@ -454,6 +534,7 @@ def test_review_stops_when_changed_files_have_no_analyzable_question_evidence(
     assert "Change summary" in result.output
     assert "Review stopped\nChanged files contain no analyzable question evidence." in result.output
     assert "Question 1" not in result.output
+    assert not (tmp_path / "coderecall-report.md").exists()
 
 
 def test_review_does_not_hide_unexpected_question_generation_errors(

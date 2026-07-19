@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -17,6 +18,7 @@ from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
 from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
+from coderecall.reporting import MarkdownReportWriter, ReportBuilder
 
 
 def _exit_with_error(error: CodeRecallError) -> None:
@@ -108,6 +110,22 @@ def review_command(
     )
     all_answers = list(answers)
     if follow_up is not None:
-        all_answers.append(terminal.capture_follow_up(follow_up.question))
+        follow_up_answer = terminal.capture_follow_up(follow_up.question)
+        follow_up = replace(follow_up, answer=follow_up_answer)
+        all_answers.append(follow_up_answer)
 
     terminal.render_answer_counts(all_answers)
+    report_path = report.resolve()
+    built_report = ReportBuilder().build(
+        context,
+        summary,
+        selected_questions,
+        answers,
+        assessments,
+        follow_up=follow_up,
+    )
+    try:
+        written_path = MarkdownReportWriter().write(built_report, report_path)
+    except CodeRecallError as error:
+        _exit_with_error(error)
+    terminal.render_report_written(written_path)

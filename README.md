@@ -9,8 +9,9 @@ the developer's answers locally to help them prepare for review.
 ## Status
 
 CodeRecall is in early development. The Python CLI can inspect a branch, render a local,
-evidence-based diff summary, generate branch-specific questions, and capture terminal answers.
-Answer evaluation and report persistence are still under development.
+evidence-based diff summary, generate branch-specific questions, capture terminal answers,
+evaluate them against repository evidence, ask one targeted follow-up when useful, and write a
+local Markdown report.
 
 ## Intended Usage
 
@@ -22,7 +23,8 @@ coderecall review --base main
 
 Git repository detection, base selection, change collection, low-signal file filtering, lightweight
 change modeling, likely side-effect detection, concise diff summaries, question generation, and
-terminal answer capture are available. Evaluation and reporting are still under development.
+terminal answer capture, grounded evaluation, adaptive follow-up, and local reporting are
+available.
 
 By default, `review` compares commits on the current branch with their merge base on the selected branch. To also include staged and unstaged changes to tracked files, run:
 
@@ -54,9 +56,25 @@ coderecall review --base main --plain
 
 Styled and plain sessions use the same wording and section order, so color never carries meaning.
 
+### Local Report
+
+Every completed review session overwrites `coderecall-report.md` in the directory where the
+command was invoked. The report contains the change summary, questions, answers, assessments,
+repository citations, any follow-up response, and a review-talking-points section. Sessions that
+stop before questions are available do not write a report.
+
+Choose a different local path with `--report`; missing parent directories are created:
+
+```bash
+coderecall review --base main --report .coderecall/reports/latest.md
+```
+
+Reports are written as UTF-8 Markdown and remain on the local filesystem. CodeRecall does not
+upload or share them.
+
 ### Assessment Labels
 
-Answer evaluation will use a stable, non-numeric assessment vocabulary:
+Answer evaluation uses a stable, non-numeric assessment vocabulary:
 
 - `Strong`: The answer matches repository evidence and covers the important reasoning.
 - `Partial`: The answer is directionally correct but misses a relevant detail.
@@ -65,11 +83,6 @@ Answer evaluation will use a stable, non-numeric assessment vocabulary:
 
 These labels describe evidence-supported understanding rather than scoring the developer. An
 `Uncertain` assessment can explain the missing or insufficient evidence in uncertainty notes.
-
-The complete workflow will eventually continue by:
-
-1. Evaluating answers against repository evidence.
-2. Writing a local Markdown report.
 
 The review context excludes generated output, vendored dependencies, lockfiles, and minified assets from analysis by default. Filtered paths remain visible in the command output with the reason they were excluded.
 

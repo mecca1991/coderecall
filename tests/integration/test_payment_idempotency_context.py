@@ -193,6 +193,7 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
             "tests/payment_handler.test.ts checks handlePayment returns the stored "
             "idempotency-key payment. It does not cover a processor failure after charging.\n"
             "\n"
+            "Use a durable idempotency record and reconcile pending processor charges.\n"
             "\n"
         ),
     )
@@ -228,13 +229,21 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert "database.transaction" in result.output
     assert "reconciliation" in result.output
     assert result.output.count("Answer:\n") == 4
-    assert result.output.count("Answer recorded.\n") == 3
-    assert result.output.count("Skipped.\n") == 1
-    assert result.output.endswith("\nSession complete\nAnswers: 3 answered, 1 skipped\n")
+    assert result.output.count("Answer recorded.\n") == 4
+    assert result.output.count("Skipped.\n") == 0
+    assert "\nSession complete\nAnswers: 4 answered, 0 skipped\n" in result.output
+    assert result.output.endswith(f'Report written: "{tmp_path / "coderecall-report.md"}"\n')
     assert "handlePayment calls payments.findByIdempotencyKey" not in result.output
     assert "rollback undoes processor.charge" not in result.output
     assert "checks handlePayment returns" not in result.output
     assert "\x1b" not in result.output
+
+    report = (tmp_path / "coderecall-report.md").read_text(encoding="utf-8")
+    assert "Revisit the rollback claim" in report
+    assert "processor.charge" in report
+    assert "database.transaction" in report
+    assert "Use a durable idempotency record and reconcile pending processor charges." in report
+    assert report.endswith("## Review Talking Points\n\n- No review talking points generated.\n")
 
     disabled = CliRunner().invoke(
         app,
@@ -250,7 +259,8 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
 
     assert disabled.exit_code == 0
     assert "Follow-up\n" not in disabled.output
-    assert disabled.output.endswith("\nSession complete\nAnswers: 3 answered, 0 skipped\n")
+    assert "\nSession complete\nAnswers: 3 answered, 0 skipped\n" in disabled.output
+    assert disabled.output.endswith(f'Report written: "{tmp_path / "coderecall-report.md"}"\n')
 
     all_strong = CliRunner().invoke(
         app,
@@ -267,4 +277,5 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
 
     assert all_strong.exit_code == 0
     assert "Follow-up\n" not in all_strong.output
-    assert all_strong.output.endswith("\nSession complete\nAnswers: 3 answered, 0 skipped\n")
+    assert "\nSession complete\nAnswers: 3 answered, 0 skipped\n" in all_strong.output
+    assert all_strong.output.endswith(f'Report written: "{tmp_path / "coderecall-report.md"}"\n')
