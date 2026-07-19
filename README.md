@@ -11,7 +11,7 @@ the developer's answers locally to help them prepare for review.
 CodeRecall is in early development. The Python CLI can inspect a branch, render a local,
 evidence-based diff summary, generate branch-specific questions, capture terminal answers,
 evaluate them against repository evidence, ask one targeted follow-up when useful, and write a
-local Markdown report.
+local Markdown report with practical review talking points.
 
 ## Intended Usage
 
@@ -62,6 +62,12 @@ Every completed review session overwrites `coderecall-report.md` in the director
 command was invoked. The report contains the change summary, questions, answers, assessments,
 repository citations, any follow-up response, and a review-talking-points section. Sessions that
 stop before questions are available do not write a report.
+
+Completed reports contain one to three deterministic preparation notes: a change explanation,
+the most important repository-grounded gap (or a detected side-effect risk when no gap exists),
+and the strongest evidence the developer demonstrably referenced. Follow-up responses remain
+separate until follow-up assessment is supported. Talking points are developer-owned preparation,
+not grades, scores, or manager-facing evaluation.
 
 Choose a different local path with `--report`; missing parent directories are created:
 
