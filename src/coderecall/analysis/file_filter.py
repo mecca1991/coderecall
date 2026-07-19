@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable
 from pathlib import Path
 
+from pathspec import GitIgnoreSpec
+
 from coderecall.core.types import (
     ChangedFile,
     FileFilterResult,
@@ -43,11 +45,13 @@ class FileFilter:
         vendored_directories: Collection[str] = DEFAULT_VENDORED_DIRECTORIES,
         lockfile_names: Collection[str] = DEFAULT_LOCKFILE_NAMES,
         minified_suffixes: Collection[str] = DEFAULT_MINIFIED_SUFFIXES,
+        configured_exclusions: Iterable[str] = (),
     ) -> None:
         self.generated_directories = frozenset(generated_directories)
         self.vendored_directories = frozenset(vendored_directories)
         self.lockfile_names = frozenset(lockfile_names)
         self.minified_suffixes = tuple(suffix.lower() for suffix in minified_suffixes)
+        self.configured_exclusions = GitIgnoreSpec.from_lines(configured_exclusions)
 
     def filter(self, changed_files: Iterable[ChangedFile]) -> FileFilterResult:
         """Separate meaningful files from low-signal files without discarding metadata."""
@@ -95,4 +99,6 @@ class FileFilter:
             return FilterReason.LOCKFILE
         if path.name.lower().endswith(self.minified_suffixes):
             return FilterReason.MINIFIED_ASSET
+        if self.configured_exclusions.match_file(path.as_posix()):
+            return FilterReason.CONFIGURED_EXCLUSION
         return None

@@ -141,3 +141,74 @@ def test_default_patterns_can_be_replaced_for_future_project_configuration() -> 
 
     assert result.included_files == (changed_file,)
     assert result.filtered_files == ()
+
+
+def test_filters_nested_git_ignore_style_configured_patterns() -> None:
+    configured = ChangedFile(
+        path=Path("packages/web/generated/client/api.py"),
+        status=FileStatus.MODIFIED,
+    )
+    meaningful = ChangedFile(path=Path("packages/web/src/api.py"), status=FileStatus.MODIFIED)
+
+    result = FileFilter(
+        configured_exclusions=("packages/*/generated/**",),
+    ).filter((configured, meaningful))
+
+    assert result.included_files == (meaningful,)
+    assert result.filtered_files[0].path == configured.path
+    assert result.filtered_files[0].reason is FilterReason.CONFIGURED_EXCLUSION
+
+
+def test_configured_exclusions_are_additive_to_built_in_defaults() -> None:
+    configured = ChangedFile(path=Path("snapshots/output.txt"), status=FileStatus.MODIFIED)
+    lockfile = ChangedFile(path=Path("package-lock.json"), status=FileStatus.MODIFIED)
+
+    result = FileFilter(configured_exclusions=("snapshots/**",)).filter((configured, lockfile))
+
+    assert tuple(item.reason for item in result.filtered_files) == (
+        FilterReason.CONFIGURED_EXCLUSION,
+        FilterReason.LOCKFILE,
+    )
+
+
+def test_built_in_reason_wins_when_configured_pattern_also_matches() -> None:
+    changed_file = ChangedFile(path=Path("dist/app.min.js"), status=FileStatus.MODIFIED)
+
+    result = FileFilter(configured_exclusions=("dist/**", "**/*.min.js")).filter((changed_file,))
+
+    assert result.filtered_files[0].reason is FilterReason.GENERATED_DIRECTORY
+
+
+def test_configured_filtering_preserves_input_order() -> None:
+    first = ChangedFile(path=Path("tmp/z.py"), status=FileStatus.MODIFIED)
+    second = ChangedFile(path=Path("tmp/a.py"), status=FileStatus.ADDED)
+
+    result = FileFilter(configured_exclusions=("tmp/**",)).filter((first, second))
+
+    assert tuple(item.path for item in result.filtered_files) == (first.path, second.path)
+
+
+def test_configured_filter_keeps_rename_crossing_exclusion_boundary() -> None:
+    renamed = ChangedFile(
+        path=Path("archive/old.py"),
+        old_path=Path("src/current.py"),
+        status=FileStatus.RENAMED,
+    )
+
+    result = FileFilter(configured_exclusions=("archive/**",)).filter((renamed,))
+
+    assert result.included_files == (renamed,)
+    assert result.filtered_files == ()
+
+
+def test_configured_filter_excludes_rename_when_both_paths_match() -> None:
+    renamed = ChangedFile(
+        path=Path("archive/new.py"),
+        old_path=Path("archive/old.py"),
+        status=FileStatus.RENAMED,
+    )
+
+    result = FileFilter(configured_exclusions=("archive/**",)).filter((renamed,))
+
+    assert result.included_files == ()
+    assert result.filtered_files[0].reason is FilterReason.CONFIGURED_EXCLUSION

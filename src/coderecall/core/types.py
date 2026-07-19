@@ -24,6 +24,7 @@ class FilterReason(StrEnum):
     VENDORED_DEPENDENCY = "vendored dependency"
     LOCKFILE = "lockfile"
     MINIFIED_ASSET = "minified asset"
+    CONFIGURED_EXCLUSION = "configured exclusion"
 
 
 class QuestionCategory(StrEnum):

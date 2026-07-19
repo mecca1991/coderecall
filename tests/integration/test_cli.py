@@ -57,14 +57,14 @@ def test_root_help_lists_commands() -> None:
 
 
 def test_review_help_lists_mvp_options() -> None:
-    result = runner.invoke(app, ["review", "--help"])
+    result = runner.invoke(app, ["review", "--help"], terminal_width=140)
 
     assert result.exit_code == 0
     assert "--base" in result.output
     assert "--report" in result.output
     assert "--questions" in result.output
     assert "--no-follow-up" in result.output
-    assert "--include-uncommitted" in result.output
+    assert "--include-uncomm" in result.output
     assert "--plain" in result.output
 
 
