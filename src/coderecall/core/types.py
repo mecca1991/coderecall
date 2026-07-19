@@ -230,6 +230,7 @@ class Assessment:
     gaps: tuple[str, ...] = ()
     evidence: tuple[EvidenceCitation, ...] = ()
     uncertainty_notes: tuple[str, ...] = ()
+    matched_evidence: tuple[EvidenceCitation, ...] = ()
 
 
 @dataclass(frozen=True)

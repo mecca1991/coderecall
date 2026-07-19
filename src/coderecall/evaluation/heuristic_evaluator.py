@@ -183,6 +183,7 @@ class HeuristicEvaluator:
             ),
             gaps=gaps,
             evidence=evidence,
+            matched_evidence=tuple(concept.citation for concept in matched),
         )
 
     def _behavior(

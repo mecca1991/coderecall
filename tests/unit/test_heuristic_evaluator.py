@@ -185,6 +185,7 @@ def test_partial_answer_keeps_repository_evidence_and_names_missing_reasoning() 
     assert assessment.label is AssessmentLabel.PARTIAL
     assert assessment.confidence == "medium"
     assert assessment.evidence == (HANDLER_CITATION,)
+    assert assessment.matched_evidence == (HANDLER_CITATION,)
     assert assessment.strengths
     assert any("concrete" in gap.lower() for gap in assessment.gaps)
 
@@ -362,6 +363,7 @@ def test_uncertain_assessments_explain_why_grounding_is_unavailable(
     assert assessment.uncertainty_notes
     assert expected_note in " ".join(assessment.uncertainty_notes).lower()
     assert assessment.evidence or assessment.uncertainty_notes
+    assert assessment.matched_evidence == ()
 
 
 def test_citations_are_filtered_deduplicated_and_keep_metadata_in_stable_order() -> None:
@@ -391,6 +393,32 @@ def test_citations_are_filtered_deduplicated_and_keep_metadata_in_stable_order()
     assert assessment.evidence[0].hunk_header == TRANSACTION_CITATION.hunk_header
     assert assessment.evidence[1].line_start == NETWORK_CITATION.line_start
     assert assessment.evidence[1].note == NETWORK_CITATION.note
+
+
+def test_matched_evidence_is_sanitized_deduplicated_and_stably_ordered() -> None:
+    outside = EvidenceCitation(
+        kind="call",
+        file_path=Path("vendor/client.py"),
+        symbol="client.send",
+        line_start=10,
+    )
+    question = failure_question(
+        TRANSACTION_CITATION,
+        outside,
+        NETWORK_CITATION,
+        TRANSACTION_CITATION,
+    )
+
+    assessment = HeuristicEvaluator().evaluate(
+        payment_context(),
+        question,
+        Answer(
+            question_id="failure",
+            raw_text=("database.transaction does not undo processor.charge; retry needs recovery."),
+        ),
+    )
+
+    assert assessment.matched_evidence == (TRANSACTION_CITATION, NETWORK_CITATION)
 
 
 def test_strong_evidence_answer_names_test_support_and_an_uncovered_path() -> None:
