@@ -204,9 +204,9 @@ def resolve_review_options(
     """Apply CLI-over-config precedence and anchor report paths to their source."""
 
     if report_path is not None:
-        effective_report_path = _anchor(report_path, invocation_directory)
+        effective_report_path = anchor_path(report_path, invocation_directory)
     elif config.report_path is not None:
-        effective_report_path = _anchor(Path(config.report_path), repository_root)
+        effective_report_path = anchor_path(Path(config.report_path), repository_root)
     else:
         effective_report_path = invocation_directory / DEFAULT_REPORT_FILENAME
 
@@ -227,7 +227,9 @@ def resolve_review_options(
     )
 
 
-def _anchor(path: Path, directory: Path) -> Path:
+def anchor_path(path: Path, directory: Path) -> Path:
+    """Resolve a path relative to a directory if it is not already absolute."""
+
     return path if path.is_absolute() else directory / path
 
 
@@ -235,5 +237,6 @@ __all__ = [
     "ConfigLoader",
     "EffectiveReviewOptions",
     "ProjectConfig",
+    "anchor_path",
     "resolve_review_options",
 ]

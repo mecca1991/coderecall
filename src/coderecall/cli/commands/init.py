@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from coderecall.cli.error_rendering import exit_with_error
-from coderecall.config import CONFIG_FILENAME, STARTER_CONFIG
+from coderecall.config import CONFIG_FILENAME, STARTER_CONFIG, anchor_path
 from coderecall.core.errors import CodeRecallError, ConfigInitializationFailed
 from coderecall.git import GitAdapter
 
@@ -27,17 +27,13 @@ def init_command(
         target = (
             repository.root / CONFIG_FILENAME
             if path is None
-            else _anchor(path, invocation_directory)
+            else anchor_path(path, invocation_directory)
         )
         _write_starter_config(target)
     except CodeRecallError as error:
         exit_with_error(error)
 
     typer.echo(f'Created CodeRecall configuration: "{target}"')
-
-
-def _anchor(path: Path, directory: Path) -> Path:
-    return path if path.is_absolute() else directory / path
 
 
 def _write_starter_config(target: Path) -> None:

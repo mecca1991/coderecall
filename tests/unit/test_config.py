@@ -10,6 +10,7 @@ from coderecall.config import (
     ConfigLoader,
     EffectiveReviewOptions,
     ProjectConfig,
+    anchor_path,
     resolve_review_options,
 )
 from coderecall.core.errors import CodeRecallError
@@ -274,3 +275,13 @@ def test_absolute_report_paths_are_preserved(tmp_path: Path) -> None:
 
     assert configured.report_path == absolute_config_path
     assert cli.report_path == absolute_cli_path
+
+
+def test_anchor_path_anchors_relative_path_to_directory(tmp_path: Path) -> None:
+    assert anchor_path(Path("reports/review.md"), tmp_path) == (tmp_path / "reports" / "review.md")
+
+
+def test_anchor_path_preserves_absolute_path(tmp_path: Path) -> None:
+    absolute_path = tmp_path / "reports" / "review.md"
+
+    assert anchor_path(absolute_path, tmp_path / "other") == absolute_path
