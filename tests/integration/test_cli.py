@@ -75,6 +75,7 @@ def test_review_help_lists_mvp_options() -> None:
     assert "--no-follow-up" in result.output
     assert "--include-uncomm" in result.output
     assert "--plain" in result.output
+    assert "--model" not in result.output
     assert "Privacy" not in result.output
 
 
