@@ -115,8 +115,7 @@ def review_command(
         all_answers.append(follow_up_answer)
 
     terminal.render_answer_counts(all_answers)
-    report_path = report if report.is_absolute() else Path.cwd() / report
-    report_path = report_path.resolve()
+    report_path = report.resolve()
     built_report = ReportBuilder().build(
         context,
         summary,
