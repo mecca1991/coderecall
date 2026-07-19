@@ -236,6 +236,7 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert "handlePayment calls payments.findByIdempotencyKey" not in result.output
     assert "rollback undoes processor.charge" not in result.output
     assert "checks handlePayment returns" not in result.output
+    assert "Explain the change:" not in result.output
     assert "\x1b" not in result.output
 
     report = (tmp_path / "coderecall-report.md").read_text(encoding="utf-8")
@@ -243,7 +244,11 @@ def test_detects_payment_processor_and_local_transaction_boundaries(
     assert "processor.charge" in report
     assert "database.transaction" in report
     assert "Use a durable idempotency record and reconcile pending processor charges." in report
-    assert report.endswith("## Review Talking Points\n\n- No review talking points generated.\n")
+    talking_points = report.split("## Review Talking Points\n\n", 1)[1]
+    assert talking_points.startswith(f"- Explain the change: {summary.purpose}\n")
+    assert "- Prepare to discuss: Revisit the rollback claim" in talking_points
+    assert "- Evidence to cite: `tests/payment_handler.test.ts`." in talking_points
+    assert "No review talking points generated." not in talking_points
 
     disabled = CliRunner().invoke(
         app,
