@@ -57,3 +57,11 @@ class ReportWriteFailed(CodeRecallError):
                 "Choose a writable location with `coderecall review --report <path>` and try again."
             ),
         )
+
+
+class ProjectConfigError(CodeRecallError):
+    """Raised when repository configuration cannot be read or validated."""
+
+
+class ConfigInitializationFailed(CodeRecallError):
+    """Raised when a starter project configuration cannot be created safely."""

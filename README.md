@@ -32,6 +32,9 @@ By default, `review` compares commits on the current branch with their merge bas
 coderecall review --base main --include-uncommitted
 ```
 
+Use `--no-include-uncommitted` to explicitly review committed changes only. This is useful when a
+project configuration enables uncommitted changes by default.
+
 Untracked files are excluded until they are added to Git. The command summarizes the meaningful
 files, changed symbols, related tests, likely side effects, and analysis uncertainty. It then asks
 three questions by default, in behavior, failure, and evidence order. Choose one to three questions
@@ -77,6 +80,51 @@ coderecall review --base main --report .coderecall/reports/latest.md
 
 Reports are written as UTF-8 Markdown and remain on the local filesystem. CodeRecall does not
 upload or share them.
+
+### Project Configuration
+
+CodeRecall loads `.coderecall.yml` only from the detected Git repository root. Missing and empty
+configuration files preserve the normal defaults without producing additional output. Create the
+starter file with:
+
+```bash
+coderecall init
+```
+
+The starter schema is:
+
+```yaml
+base: main
+report_path: coderecall-report.md
+questions: 3
+include_uncommitted: false
+exclude:
+  - node_modules/**
+  - dist/**
+  - build/**
+  - vendor/**
+```
+
+`base`, `report_path`, `questions`, and `include_uncommitted` follow this precedence: an explicit
+CLI option, then the project configuration, then the existing application default. The defaults
+are automatic `main`/`master` base inference, `coderecall-report.md`, three questions, and committed
+changes only. Both `--include-uncommitted` and `--no-include-uncommitted` count as explicit CLI
+choices.
+
+Relative paths have intentionally different anchors. A configured `report_path` is relative to
+the repository root. A relative `--report` path—and the default report path when no configuration
+sets one—is relative to the directory where `coderecall review` was invoked.
+
+`exclude` accepts positive Git-ignore-style patterns and is configuration-only. These patterns add
+to CodeRecall's built-in generated-directory, vendored-dependency, lockfile, and minified-asset
+filtering; they do not replace it. When a path matches both, the built-in reason is reported.
+Negated and parent-traversal patterns are rejected.
+
+To write the starter template somewhere else, use `coderecall init --path <path>`. Relative
+explicit paths are anchored to the invocation directory. Missing parent directories are created,
+but CodeRecall never overwrites an existing file and has no force option. Invalid YAML, unknown
+keys, invalid values, and unreadable configuration files stop the command with the config path and
+corrective guidance.
 
 ### Assessment Labels
 
