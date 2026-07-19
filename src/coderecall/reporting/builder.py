@@ -11,6 +11,7 @@ from coderecall.core.types import (
     ChangeContext,
     DiffSummary,
     FollowUp,
+    ModelMode,
     Question,
     Report,
 )
@@ -30,6 +31,7 @@ class ReportBuilder:
         answers: Sequence[Answer],
         assessments: Sequence[Assessment],
         *,
+        model_mode: ModelMode = ModelMode.LOCAL_HEURISTIC,
         follow_up: FollowUp | None = None,
         review_talking_points: Sequence[str] = (),
     ) -> Report:
@@ -55,6 +57,7 @@ class ReportBuilder:
             session_metadata={
                 "branch": context.current_branch,
                 "base_branch": context.base_branch,
+                "model_mode": model_mode.value,
                 "generated_at": generated_at.astimezone(UTC).isoformat(timespec="seconds"),
             },
             diff_summary=summary.purpose,

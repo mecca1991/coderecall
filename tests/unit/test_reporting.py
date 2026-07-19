@@ -16,6 +16,7 @@ from coderecall.core.types import (
     DiffSummary,
     EvidenceCitation,
     FollowUp,
+    ModelMode,
     Question,
     QuestionCategory,
 )
@@ -83,6 +84,7 @@ def test_builder_generates_utc_metadata_and_orders_payload_by_question() -> None
     assert report.session_metadata == {
         "branch": "feature/reporting",
         "base_branch": "main",
+        "model_mode": "Local heuristic (no remote model)",
         "generated_at": "2026-07-18T12:30:45+00:00",
     }
     assert report.diff_summary == "Likely adds local reporting."
@@ -185,6 +187,7 @@ def test_render_includes_multiline_skipped_uncertain_and_evidence_rich_content()
         "# CodeRecall Report\n\n"
         "Branch: feature/reporting\n"
         "Base branch: main\n"
+        "Model mode: Local heuristic (no remote model)\n"
         "Generated: 2026-07-18T12:30:45+00:00\n"
     )
     assert "## Change Summary\n\nLikely changes the payment flow." in rendered
@@ -203,6 +206,21 @@ def test_render_includes_multiline_skipped_uncertain_and_evidence_rich_content()
     )
     assert "## Follow-Up" not in rendered
     assert rendered.endswith("## Review Talking Points\n\n- No review talking points generated.\n")
+
+
+def test_builder_accepts_model_mode_as_a_keyword_only_argument() -> None:
+    question = make_question()
+
+    report = ReportBuilder(clock=lambda: NOW).build(
+        make_context(),
+        DiffSummary(purpose="Summary."),
+        (question,),
+        (Answer(question_id="behavior", raw_text="Answer."),),
+        (make_assessment(),),
+        model_mode=ModelMode.LOCAL_HEURISTIC,
+    )
+
+    assert report.session_metadata["model_mode"] == "Local heuristic (no remote model)"
 
 
 def test_render_includes_follow_up_answer_citations_and_optional_assessment() -> None:

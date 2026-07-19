@@ -22,6 +22,7 @@ class MarkdownReportWriter:
             "",
             f"Branch: {metadata.get('branch', '')}",
             f"Base branch: {metadata.get('base_branch', '')}",
+            f"Model mode: {metadata.get('model_mode', '')}",
             f"Generated: {metadata.get('generated_at', '')}",
             "",
             "## Change Summary",
