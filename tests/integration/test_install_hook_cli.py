@@ -86,8 +86,7 @@ def test_install_hook_from_nested_directory_uses_automatic_runtime_base(
         in result.output
     )
     assert (
-        "Advisory: declining, no terminal, or review failure continues the push."
-        in result.output
+        "Advisory: declining, no terminal, or review failure continues the push." in result.output
     )
     assert "Bypass: git push --no-verify" in result.output
     assert f'Installed CodeRecall pre-push hook: "{hook_path}"' in result.output

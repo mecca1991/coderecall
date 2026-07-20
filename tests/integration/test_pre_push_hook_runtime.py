@@ -16,8 +16,7 @@ import pytest
 from coderecall.hooks import build_pre_push_hook
 
 GIT_REF_INPUT = (
-    "refs/heads/feature abcdef refs/heads/feature "
-    "0000000000000000000000000000000000000000\n"
+    "refs/heads/feature abcdef refs/heads/feature 0000000000000000000000000000000000000000\n"
 )
 
 
@@ -33,7 +32,7 @@ def write_fake_coderecall(directory: Path) -> Path:
     executable.write_text(
         "#!/bin/sh\n"
         ': >"$CODERECALL_LOG"\n'
-        'for coderecall_arg do\n'
+        "for coderecall_arg do\n"
         '    printf \'arg:%s\\n\' "$coderecall_arg" >>"$CODERECALL_LOG"\n'
         "done\n"
         "IFS= read -r coderecall_review_input\n"

@@ -25,9 +25,7 @@ def install_hook_command(
     force: bool = typer.Option(
         False,
         "--force",
-        help=(
-            "Replace a changed CodeRecall-managed hook. Unmanaged hooks are always preserved."
-        ),
+        help=("Replace a changed CodeRecall-managed hook. Unmanaged hooks are always preserved."),
     ),
 ) -> None:
     """Install an advisory pre-push hook; bypass it with git push --no-verify."""

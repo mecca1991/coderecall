@@ -148,9 +148,7 @@ def test_installer_preserves_unmanaged_file_even_with_force(tmp_path: Path) -> N
 
     assert "will not overwrite existing pre-push hook" in captured.value.message
     assert "Integrate CodeRecall manually" in (captured.value.recovery or "")
-    assert "`--force` only replaces CodeRecall-managed hooks" in (
-        captured.value.recovery or ""
-    )
+    assert "`--force` only replaces CodeRecall-managed hooks" in (captured.value.recovery or "")
     assert hook_path.read_text(encoding="utf-8") == unmanaged
 
 
