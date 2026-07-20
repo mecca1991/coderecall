@@ -65,3 +65,7 @@ class ProjectConfigError(CodeRecallError):
 
 class ConfigInitializationFailed(CodeRecallError):
     """Raised when a starter project configuration cannot be created safely."""
+
+
+class HookInstallationFailed(CodeRecallError):
+    """Raised when a pre-push hook cannot be installed safely."""
