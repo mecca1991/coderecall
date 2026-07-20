@@ -78,11 +78,15 @@ def test_installer_creates_hook_exclusively_with_executable_permissions(tmp_path
     assert hook_path.stat().st_mode & 0o111 == 0o111
 
 
-def test_installer_treats_identical_executable_hook_as_already_current(tmp_path: Path) -> None:
+@pytest.mark.parametrize("executable_mode", [0o700, 0o755])
+def test_installer_treats_identical_executable_hook_as_already_current(
+    tmp_path: Path,
+    executable_mode: int,
+) -> None:
     hook_path = tmp_path / "pre-push"
     content = build_pre_push_hook(None)
     hook_path.write_text(content, encoding="utf-8")
-    hook_path.chmod(0o755)
+    hook_path.chmod(executable_mode)
     original_stat = hook_path.stat()
 
     result = HookInstaller().install(hook_path, content, force=False)

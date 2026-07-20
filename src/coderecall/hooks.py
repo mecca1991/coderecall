@@ -165,7 +165,7 @@ class HookInstaller:
             )
 
         if existing_content == content:
-            if existing_stat.st_mode & 0o111 == 0o111:
+            if existing_stat.st_mode & 0o111:
                 return HookInstallationResult(
                     path=path,
                     status=HookInstallationStatus.ALREADY_CURRENT,
