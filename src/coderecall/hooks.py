@@ -14,6 +14,7 @@ from coderecall.core.errors import HookInstallationFailed
 
 HOOK_OWNERSHIP_MARKER = "# Managed by CodeRecall. Do not edit."
 HOOK_VERSION_MARKER = "# CodeRecall hook version: 1"
+_MAX_EXISTING_HOOK_BYTES = 64 * 1024
 
 
 class HookInstallationStatus(Enum):
@@ -195,13 +196,19 @@ class HookInstaller:
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             descriptor = os.open(path, flags)
-            with os.fdopen(descriptor, "r", encoding="utf-8", errors="surrogateescape") as hook:
-                if not stat.S_ISREG(os.fstat(hook.fileno()).st_mode):
+            with os.fdopen(descriptor, "rb") as hook:
+                file_stat = os.fstat(hook.fileno())
+                if not stat.S_ISREG(file_stat.st_mode):
                     raise HookInstallationFailed(
                         f'CodeRecall will not overwrite existing pre-push path "{path}".',
                         recovery="Move the existing path or integrate CodeRecall manually.",
                     )
-                return hook.read()
+                if file_stat.st_size > _MAX_EXISTING_HOOK_BYTES:
+                    raise HookInstaller._oversized_hook_error(path)
+                content = hook.read(_MAX_EXISTING_HOOK_BYTES + 1)
+                if len(content) > _MAX_EXISTING_HOOK_BYTES:
+                    raise HookInstaller._oversized_hook_error(path)
+                return content.decode("utf-8", errors="surrogateescape")
         except HookInstallationFailed:
             raise
         except OSError as error:
@@ -209,6 +216,14 @@ class HookInstaller:
                 f'Could not read the existing pre-push hook at "{path}": {error}',
                 recovery="Check the hook permissions and integrate CodeRecall manually.",
             ) from error
+
+    @staticmethod
+    def _oversized_hook_error(path: Path) -> HookInstallationFailed:
+        return HookInstallationFailed(
+            f'Existing pre-push hook at "{path}" exceeds CodeRecall\'s '
+            f"{_MAX_EXISTING_HOOK_BYTES:,}-byte read limit.",
+            recovery="Integrate CodeRecall manually or reduce the existing hook's size.",
+        )
 
     @staticmethod
     def _make_executable_without_following(path: Path) -> None:

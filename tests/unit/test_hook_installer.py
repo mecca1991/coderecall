@@ -156,6 +156,20 @@ def test_installer_preserves_unmanaged_file_even_with_force(tmp_path: Path) -> N
     assert hook_path.read_text(encoding="utf-8") == unmanaged
 
 
+def test_installer_rejects_oversized_existing_hook_without_modifying_it(tmp_path: Path) -> None:
+    hook_path = tmp_path / "pre-push"
+    oversized = build_pre_push_hook("main") + "#" * (64 * 1024)
+    hook_path.write_text(oversized, encoding="utf-8")
+    hook_path.chmod(0o755)
+
+    with pytest.raises(HookInstallationFailed) as captured:
+        HookInstaller().install(hook_path, build_pre_push_hook("release"), force=True)
+
+    assert "65,536-byte read limit" in captured.value.message
+    assert "Integrate CodeRecall manually" in (captured.value.recovery or "")
+    assert hook_path.read_text(encoding="utf-8") == oversized
+
+
 def test_installer_preserves_symlink_even_when_target_is_managed_and_force_is_set(
     tmp_path: Path,
 ) -> None:
