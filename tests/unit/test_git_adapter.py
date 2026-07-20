@@ -12,6 +12,7 @@ from coderecall.core.errors import (
     DetachedHead,
     DiffCollectionFailed,
     GitCommandFailed,
+    HookInstallationFailed,
     NotGitRepository,
 )
 from coderecall.git import GitAdapter
@@ -185,6 +186,76 @@ def test_select_base_branch_fails_when_inference_is_impossible(tmp_path: Path) -
 
     assert "could not infer a base branch" in captured.value.message
     assert "main, master" in (captured.value.debug_details or "")
+
+
+def test_resolve_pre_push_hook_path_uses_git_default_from_nested_directory(
+    tmp_path: Path,
+) -> None:
+    initialize_repository(tmp_path, "main")
+    nested = tmp_path / "src" / "package"
+    nested.mkdir(parents=True)
+    git = GitAdapter(nested)
+
+    hook_path = git.resolve_pre_push_hook_path(git.detect_repository())
+
+    assert hook_path == (tmp_path / ".git" / "hooks" / "pre-push").resolve()
+
+
+def test_resolve_pre_push_hook_path_honors_relative_core_hooks_path(tmp_path: Path) -> None:
+    initialize_repository(tmp_path, "main")
+    run_git(tmp_path, "config", "core.hooksPath", ".githooks")
+    git = GitAdapter(tmp_path)
+
+    hook_path = git.resolve_pre_push_hook_path(git.detect_repository())
+
+    assert hook_path == (tmp_path / ".githooks" / "pre-push").resolve()
+
+
+def test_resolve_pre_push_hook_path_honors_absolute_core_hooks_path(tmp_path: Path) -> None:
+    initialize_repository(tmp_path, "main")
+    custom_hooks = tmp_path / "shared-hooks"
+    run_git(tmp_path, "config", "core.hooksPath", str(custom_hooks))
+    git = GitAdapter(tmp_path)
+
+    hook_path = git.resolve_pre_push_hook_path(git.detect_repository())
+
+    assert hook_path == custom_hooks / "pre-push"
+
+
+def test_resolve_pre_push_hook_path_uses_common_hooks_for_linked_worktree(
+    tmp_path: Path,
+) -> None:
+    repository_root = tmp_path / "repository"
+    repository_root.mkdir()
+    initialize_repository(repository_root, "main")
+    commit_file(repository_root)
+    linked_worktree = tmp_path / "linked"
+    run_git(
+        repository_root,
+        "worktree",
+        "add",
+        "--quiet",
+        "-b",
+        "feature/hook",
+        str(linked_worktree),
+    )
+    git = GitAdapter(linked_worktree)
+
+    hook_path = git.resolve_pre_push_hook_path(git.detect_repository())
+
+    assert hook_path == (repository_root / ".git" / "hooks" / "pre-push").resolve()
+
+
+def test_resolve_pre_push_hook_path_rejects_disabled_hooks(tmp_path: Path) -> None:
+    initialize_repository(tmp_path, "main")
+    run_git(tmp_path, "config", "core.hooksPath", "/dev/null")
+    git = GitAdapter(tmp_path)
+
+    with pytest.raises(HookInstallationFailed) as captured:
+        git.resolve_pre_push_hook_path(git.detect_repository())
+
+    assert "hooks are disabled" in captured.value.message
+    assert "core.hooksPath" in (captured.value.recovery or "")
 
 
 def test_find_merge_base_reports_unrelated_histories(tmp_path: Path) -> None:

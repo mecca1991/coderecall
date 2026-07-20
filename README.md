@@ -153,13 +153,44 @@ These labels describe evidence-supported understanding rather than scoring the d
 
 The review context excludes generated output, vendored dependencies, lockfiles, and minified assets from analysis by default. Filtered paths remain visible in the command output with the reason they were excluded.
 
-Optional pre-push hook support is planned:
+### Optional Pre-Push Hook
+
+Install CodeRecall's advisory pre-push hook from anywhere inside a Git working tree:
 
 ```bash
 coderecall install-hook
 ```
 
-The hook is intended to be opt-in and bypassable.
+The installer shows the Git-resolved hook path, review base behavior, advisory policy, and bypass
+command before it writes anything. It honors repository layouts, linked worktrees, and configured
+`core.hooksPath` directories. Git configurations that disable hooks with
+`core.hooksPath=/dev/null` are rejected.
+
+With no `--base`, the installed hook runs `coderecall review` without a base argument. Each review
+therefore uses the project configuration available at push time, followed by CodeRecall's normal
+`main`/`master` inference. To validate and store a fixed base in the hook instead, run:
+
+```bash
+coderecall install-hook --base <branch>
+```
+
+Before an interactive push, the hook asks `Run CodeRecall review before push? [y/N]`. Only `y` or
+`yes`, case-insensitively, starts a review; every other response skips it. The prompt and accepted
+review read from the terminal rather than Git's ref-update input. If no terminal is available, the
+hook prints a notice and continues. If `coderecall` is unavailable or the review exits with an
+error, the hook reports the status and also continues. The hook is advisory and always allows the
+push.
+
+CodeRecall creates only an absent hook or updates a hook carrying its management marker. An
+identical managed hook is left unchanged. Changed managed content requires `--force`; even with
+`--force`, CodeRecall never overwrites or follows an unmanaged hook or symbolic link. Integrate
+CodeRecall manually if the repository already has another `pre-push` hook.
+
+Bypass the hook entirely for one push with Git's standard option:
+
+```bash
+git push --no-verify
+```
 
 ## Development Setup
 
