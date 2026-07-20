@@ -15,6 +15,7 @@ from coderecall.core.errors import (
     DetachedHead,
     DiffCollectionFailed,
     GitCommandFailed,
+    HookInstallationFailed,
     NotGitRepository,
 )
 from coderecall.core.types import RepositoryContext
@@ -168,6 +169,66 @@ class GitAdapter:
             recovery="Run `coderecall review --base <branch>` with an existing branch.",
             debug_details="Checked local refs: main, master.",
         )
+
+    def resolve_pre_push_hook_path(self, repository: RepositoryContext) -> Path:
+        """Ask Git for the active pre-push path, including hooksPath relocation."""
+
+        configured_path = self._run(
+            "config",
+            "--path",
+            "--get",
+            "core.hooksPath",
+            cwd=repository.root,
+        )
+        if configured_path.returncode not in (0, 1):
+            details = configured_path.stderr.strip() or (
+                f"Git exited with {configured_path.returncode}."
+            )
+            raise HookInstallationFailed(
+                "CodeRecall could not inspect Git's configured hooks path.",
+                recovery="Resolve the Git configuration error and run the installer again.",
+                debug_details=(
+                    f"{self._display_command('config', '--path', '--get', 'core.hooksPath')}: "
+                    f"{details}"
+                ),
+            )
+        if configured_path.returncode == 0 and configured_path.stdout.strip().rstrip("/") == (
+            "/dev/null"
+        ):
+            raise HookInstallationFailed(
+                "Git hooks are disabled because `core.hooksPath` is `/dev/null`.",
+                recovery=(
+                    "Change or unset `core.hooksPath` if you want to install the CodeRecall hook."
+                ),
+            )
+
+        arguments = (
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "hooks/pre-push",
+        )
+        result = self._run(*arguments, cwd=repository.root)
+        if result.returncode != 0:
+            details = result.stderr.strip() or f"Git exited with {result.returncode}."
+            raise HookInstallationFailed(
+                "CodeRecall could not resolve Git's active pre-push hook path.",
+                recovery="Check `core.hooksPath` and the repository, then try again.",
+                debug_details=f"{self._display_command(*arguments)}: {details}",
+            )
+
+        resolved_path = result.stdout.strip()
+        if not resolved_path:
+            raise HookInstallationFailed(
+                "Git did not return an active pre-push hook path.",
+                recovery="Check `core.hooksPath` and the repository, then try again.",
+                debug_details=self._display_command(*arguments),
+            )
+
+        hook_path = Path(resolved_path)
+        if not hook_path.is_absolute():
+            hook_path = (repository.root / hook_path).absolute()
+        return hook_path
 
     def find_merge_base(
         self,
