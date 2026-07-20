@@ -67,7 +67,7 @@ Report written: "/path/to/repository/coderecall-report.md"
 | Option | Behavior |
 | --- | --- |
 | `--base <branch>` | Compare against an explicit base; otherwise infer `main` or `master`. |
-| `--report <path>` | Write the local Markdown report to a custom path. |
+| `--report <path>` | Write the local Markdown report to a custom path (default: `coderecall-report.md`). |
 | `--questions <1-3>` | Choose the number of questions; the default is three. |
 | `--no-follow-up` | Disable the adaptive follow-up question. |
 | `--include-uncommitted` | Include staged and unstaged changes to tracked files. |
