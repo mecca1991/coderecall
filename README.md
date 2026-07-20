@@ -1,110 +1,86 @@
 # CodeRecall
 
-CodeRecall is a local CLI for developers who want to check their understanding of a code
-change before they share it.
+Check that you understand a code change before you share it.
 
-It analyzes the current Git branch, asks targeted questions about the changed code, and captures
-the developer's answers locally to help them prepare for review.
+## What It Does
 
-## Status
+CodeRecall compares the current Git branch with a base branch, summarizes the meaningful changes,
+and asks up to three questions about behavior, failure modes, and evidence. It evaluates answers
+against local repository evidence and may ask one targeted follow-up. A completed session writes a
+local Markdown report containing the summary, answers, assessments, citations, any follow-up, and
+practical review talking points.
 
-CodeRecall is in early development. The Python CLI can inspect a branch, render a local,
-evidence-based diff summary, generate branch-specific questions, capture terminal answers,
-evaluate them against repository evidence, ask one targeted follow-up when useful, and write a
-local Markdown report with practical review talking points.
+## Install
 
-## Intended Usage
+CodeRecall requires Python 3.11 or newer. It is not published on PyPI; install it directly from
+GitHub with either `uv` or `pipx`:
 
-The main workflow is:
+```bash
+uv tool install git+https://github.com/mecca1991/coderecall.git
+```
+
+```bash
+pipx install git+https://github.com/mecca1991/coderecall.git
+```
+
+## Quick Start
+
+Run a review from anywhere inside your Git working tree:
 
 ```bash
 coderecall review --base main
 ```
 
-Git repository detection, base selection, change collection, low-signal file filtering, lightweight
-change modeling, likely side-effect detection, concise diff summaries, question generation, and
-terminal answer capture, grounded evaluation, adaptive follow-up, and local reporting are
-available.
+An abridged session looks like this:
 
-By default, `review` compares commits on the current branch with their merge base on the selected branch. To also include staged and unstaged changes to tracked files, run:
+```text
+Privacy
+Model mode: Local heuristic (no remote model)
+Repository content, answers, and reports stay on this machine.
+CodeRecall sends no telemetry and makes no network requests.
 
-```bash
-coderecall review --base main --include-uncommitted
+CodeRecall review
+Branch: feature/payment-retry -> main
+Changes: 3 total, 3 analyzed, 0 filtered
+
+Change summary
+Purpose: Likely updates the payment retry flow across 3 meaningful files.
+Likely side effects:
+  - network call: The changed code likely makes a network or external service call.
+
+Questions
+Question 1/3 — Behavior
+What behavior does the changed payment service introduce, and how does it affect the surrounding flow?
+Answer:
+
+...
+
+Session complete
+Answers: 3 answered, 0 skipped
+Report written: "/path/to/repository/coderecall-report.md"
 ```
 
-Use `--no-include-uncommitted` to explicitly review committed changes only. This is useful when a
-project configuration enables uncommitted changes by default.
+## Usage
 
-Untracked files are excluded until they are added to Git. The command summarizes the meaningful
-files, changed symbols, related tests, likely side effects, and analysis uncertainty. It then asks
-three questions by default, in behavior, failure, and evidence order. Choose one to three questions
-with:
+`coderecall review` supports:
 
-```bash
-coderecall review --base main --questions 2
-```
+| Option | Behavior |
+| --- | --- |
+| `--base <branch>` | Compare against an explicit base; otherwise infer `main` or `master`. |
+| `--report <path>` | Write the local Markdown report to a custom path. |
+| `--questions <1-3>` | Choose the number of questions; the default is three. |
+| `--no-follow-up` | Disable the adaptive follow-up question. |
+| `--include-uncommitted` | Include staged and unstaged changes to tracked files. |
+| `--no-include-uncommitted` | Review committed changes only. |
+| `--plain` | Disable styled terminal output. |
 
-Answers may span multiple lines. A blank line submits the current answer, while pressing Enter
-immediately records an explicit skip. End-of-file safely submits any partial answer and skips the
-remaining questions.
-
-In an interactive terminal, CodeRecall uses restrained styling for headings, question categories,
-warnings, and answer status. Every label and message remains present without color, and redirected
-output automatically falls back to unstyled text. To explicitly disable ANSI styling and terminal
-detection, use:
-
-```bash
-coderecall review --base main --plain
-```
-
-Styled and plain sessions use the same wording and section order, so color never carries meaning.
-
-### Privacy and Model Mode
-
-The MVP uses deterministic local heuristic evaluation. Every executed `coderecall review` starts
-by identifying the model mode as `Local heuristic (no remote model)` before CodeRecall inspects the
-Git repository. There is no remote model provider, model selection option, or consent prompt in the
-local-only MVP.
-
-Repository content, answers, and reports stay on the machine running CodeRecall. The CLI sends no
-telemetry, makes no network requests, performs no automatic uploads, and never shares a completed
-report. Reports are ordinary local Markdown files controlled by the developer.
-
-If a remote model mode is added in the future, it must require explicit user opt-in before a remote
-provider is constructed or any repository content is sent outside the machine.
-
-### Local Report
-
-Every completed review session overwrites `coderecall-report.md` in the directory where the
-command was invoked. The report contains the change summary, questions, answers, assessments,
-repository citations, any follow-up response, and a review-talking-points section. Sessions that
-stop before questions are available do not write a report.
-
-Completed reports contain one to three deterministic preparation notes: a change explanation,
-the most important repository-grounded gap (or a detected side-effect risk when no gap exists),
-and the strongest evidence the developer demonstrably referenced. Follow-up responses remain
-separate until follow-up assessment is supported. Talking points are developer-owned preparation,
-not grades, scores, or manager-facing evaluation.
-
-Choose a different local path with `--report`; missing parent directories are created:
-
-```bash
-coderecall review --base main --report .coderecall/reports/latest.md
-```
-
-Reports are written as UTF-8 Markdown and remain on the local filesystem.
+Untracked files are excluded until they are added to Git. Generated directories, vendored
+dependencies, lockfiles, and minified assets are filtered from analysis and reported with their
+filter reason.
 
 ### Project Configuration
 
-CodeRecall loads `.coderecall.yml` only from the detected Git repository root. Missing and empty
-configuration files preserve the normal defaults without producing additional output. Create the
-starter file with:
-
-```bash
-coderecall init
-```
-
-The starter schema is:
+Run `coderecall init` to create `.coderecall.yml` at the repository root:
 
 ```yaml
 base: main
@@ -118,148 +94,47 @@ exclude:
   - vendor/**
 ```
 
-`base`, `report_path`, `questions`, and `include_uncommitted` follow this precedence: an explicit
-CLI option, then the project configuration, then the existing application default. The defaults
-are automatic `main`/`master` base inference, `coderecall-report.md`, three questions, and committed
-changes only. Both `--include-uncommitted` and `--no-include-uncommitted` count as explicit CLI
-choices.
-
-Relative paths have intentionally different anchors. A configured `report_path` is relative to
-the repository root. A relative `--report` path—and the default report path when no configuration
-sets one—is relative to the directory where `coderecall review` was invoked.
-
-`exclude` accepts positive Git-ignore-style patterns and is configuration-only. These patterns add
-to CodeRecall's built-in generated-directory, vendored-dependency, lockfile, and minified-asset
-filtering; they do not replace it. When a path matches both, the built-in reason is reported.
-Negated and parent-traversal patterns are rejected.
-
-To write the starter template somewhere else, use `coderecall init --path <path>`. Relative
-explicit paths are anchored to the invocation directory. Missing parent directories are created,
-but CodeRecall never overwrites an existing file and has no force option. Invalid YAML, unknown
-keys, invalid values, and unreadable configuration files stop the command with the config path and
-corrective guidance.
+Command-line options override configuration values. `exclude` accepts positive
+Git-ignore-style patterns and adds them to CodeRecall's built-in filtering.
 
 ### Assessment Labels
 
-Answer evaluation uses a stable, non-numeric assessment vocabulary:
+| Label | Meaning |
+| --- | --- |
+| `Strong` | Matches repository evidence and covers the important reasoning. |
+| `Partial` | Directionally correct but misses a relevant detail. |
+| `Gap found` | Conflicts with evidence or misses a critical failure mode. |
+| `Uncertain` | Available evidence cannot support a confident evaluation. |
 
-- `Strong`: The answer matches repository evidence and covers the important reasoning.
-- `Partial`: The answer is directionally correct but misses a relevant detail.
-- `Gap found`: The answer conflicts with repository evidence or misses a critical failure mode.
-- `Uncertain`: CodeRecall cannot confidently evaluate the answer from available evidence.
-
-These labels describe evidence-supported understanding rather than scoring the developer. An
-`Uncertain` assessment can explain the missing or insufficient evidence in uncertainty notes.
-
-The review context excludes generated output, vendored dependencies, lockfiles, and minified assets from analysis by default. Filtered paths remain visible in the command output with the reason they were excluded.
+Assessments are evidence-grounded preparation feedback, not numeric scores.
 
 ### Optional Pre-Push Hook
 
-Install CodeRecall's advisory pre-push hook from anywhere inside a Git working tree:
+Install the advisory hook with `coderecall install-hook`. Use `--base <branch>` to store an
+explicit base and `--force` to replace changed CodeRecall-managed hook content. Existing unmanaged
+hooks and symbolic links are preserved. Declining the prompt, lacking a terminal, or encountering
+a review error always allows the push to continue; `git push --no-verify` bypasses the hook
+entirely.
 
-```bash
-coderecall install-hook
-```
+## Privacy
 
-The installer shows the Git-resolved hook path, review base behavior, advisory policy, and bypass
-command before it writes anything. It honors repository layouts, linked worktrees, and configured
-`core.hooksPath` directories. Git configurations that disable hooks with
-`core.hooksPath=/dev/null` are rejected.
+**CodeRecall reviews are local-only.** The implemented model mode is
+`Local heuristic (no remote model)`: repository content, answers, assessments, and reports remain
+on the machine running CodeRecall. The CLI sends no telemetry, makes no network requests, and does
+not upload or share reports.
 
-With no `--base`, the installed hook runs `coderecall review` without a base argument. Each review
-therefore uses the project configuration available at push time, followed by CodeRecall's normal
-`main`/`master` inference. To validate and store a fixed base in the hook instead, run:
-
-```bash
-coderecall install-hook --base <branch>
-```
-
-Before an interactive push, the hook asks `Run CodeRecall review before push? [y/N]`. Only `y` or
-`yes`, case-insensitively, starts a review; every other response skips it. The prompt and accepted
-review read from the terminal rather than Git's ref-update input. If no terminal is available, the
-hook prints a notice and continues. If `coderecall` is unavailable or the review exits with an
-error, the hook reports the status and also continues. The hook is advisory and always allows the
-push.
-
-CodeRecall creates only an absent hook or updates a hook carrying its management marker. An
-identical managed hook is left unchanged. Changed managed content requires `--force`; even with
-`--force`, CodeRecall never overwrites or follows an unmanaged hook or symbolic link. Integrate
-CodeRecall manually if the repository already has another `pre-push` hook.
-
-Bypass the hook entirely for one push with Git's standard option:
-
-```bash
-git push --no-verify
-```
-
-## Development Setup
-
-Clone the repository:
+## Development
 
 ```bash
 git clone https://github.com/mecca1991/coderecall.git
 cd coderecall
-```
-
-CodeRecall requires Python 3.11 or newer.
-
-Recommended setup with `uv`:
-
-```bash
 uv sync
-uv run coderecall --help
-```
-
-Standard `pip` setup:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-coderecall --help
-```
-
-Run tests:
-
-```bash
 uv run pytest
-```
-
-Run linting:
-
-```bash
 uv run ruff check .
-```
-
-Run type checking:
-
-```bash
+uv run ruff format --check .
 uv run mypy
 ```
 
-## Local Files
-
-CodeRecall reports are local developer artifacts and should not be committed:
-
-```text
-coderecall-report.md
-.coderecall/
-```
-
-Internal planning and brainstorming documents should live under `docs/` and are ignored by default.
-
-## Project Direction
-
-CodeRecall is designed as a developer learning tool, not a surveillance or productivity scoring tool.
-
-The product should remain:
-
-- Local-first.
-- Developer-owned.
-- Evidence-grounded.
-- Short by default.
-- Respectful in feedback.
-
 ## License
 
-CodeRecall is released under the [MIT License](./LICENSE). It may be used for personal, academic, or commercial projects.
+CodeRecall is available under the [MIT License](./LICENSE).
