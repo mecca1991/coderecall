@@ -49,7 +49,49 @@ _JS_IMPORT_SIDE_EFFECT = re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]")
 _JS_REQUIRE = re.compile(r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)")
 _JS_CALL = re.compile(r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
 _NON_CALL_PREFIXES = frozenset({"catch", "class", "for", "function", "if", "switch", "while"})
-_PYTHON_HUNK_SYMBOL = re.compile(r"^(?:(async)\s+)?(def|class)\s+([A-Za-z_]\w*)")
+_PYTHON_HUNK_FUNCTION = re.compile(
+    r"^\s*(?:async\s+)?def\s+(?P<name>[A-Za-z_]\w*)\s*\([^)]*\)\s*"
+    r"(?:->\s*[^:]+)?\s*:"
+)
+_PYTHON_HUNK_CLASS = re.compile(r"^\s*class\s+(?P<name>[A-Za-z_]\w*)\s*(?:\([^)]*\))?\s*:")
+_JS_HUNK_FUNCTION = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function(?:\s*\*\s*|\s+)"
+    r"(?P<name>[A-Za-z_$][\w$]*)\s*(?:<[^;={}()]*>)?\s*\([^)]*\)\s*"
+    r"(?::[^{};=]+)?\s*\{"
+)
+_JS_HUNK_CLASS = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?class\s+(?P<name>[A-Za-z_$][\w$]*)"
+    r"(?=\s*(?:$|[{<]|extends\b|implements\b))"
+)
+_HUNK_TYPE_DECLARATION = re.compile(
+    r"^\s*(?:(?:abstract|base|data|final|internal|partial|private|protected|public|pub|sealed|static)\s+)*"
+    r"(?P<kind>class|enum|mixin|extension|struct|interface|trait|record)\s+"
+    r"(?P<name>[A-Za-z_]\w*)\b"
+    r"(?=\s*(?:$|[{(:<]|extends\b|implements\b|on\b|where\b|with\b))"
+)
+_GO_HUNK_TYPE_DECLARATION = re.compile(
+    r"^\s*type\s+(?P<name>[A-Za-z_]\w*)\s+(?P<kind>struct|interface)\b"
+)
+_GO_HUNK_FUNCTION = re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_]\w*)\s*\([^)]*\)")
+_FN_HUNK_FUNCTION = re.compile(
+    r"^\s*(?:(?:async|const|extern(?:\s+\"[^\"]+\")?|pub(?:\([^)]*\))?|unsafe)\s+)*"
+    r"fn\s+(?P<name>[A-Za-z_]\w*)\s*(?:<[^;={}()]*>)?\s*\([^)]*\)"
+)
+_FUN_HUNK_FUNCTION = re.compile(
+    r"^\s*(?:(?:abstract|actual|expect|external|final|inline|internal|open|operator|override|"
+    r"private|protected|public|suspend|tailrec)\s+)*fun\s+"
+    r"(?:[A-Za-z_][\w?.<>]*\.)?(?P<name>[A-Za-z_]\w*)\s*"
+    r"(?:<[^;={}()]*>)?\s*\([^)]*\)"
+)
+_TYPED_HUNK_FUNCTION = re.compile(
+    r"^\s*(?:(?:abstract|async|const|constexpr|extern|external|final|inline|internal|long|native|"
+    r"override|private|protected|public|short|signed|static|synchronized|unsigned|virtual)\s+)*"
+    r"[A-Za-z_][\w.:]*(?:\s*<[^;={}()]+>)?(?:\s*\[\s*\])*(?:\s*[?*&]+\s*|\s+)"
+    r"(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*"
+    r"(?:<[^;={}()]*>)?\s*\([^;={}()]*\)\s*"
+    r"(?:(?:async|const|final|noexcept|override)\s*)*"
+    r"(?:(?:->|:)\s*[^;={}]+\s*)?(?:\{|=>|;)"
+)
 
 
 class ChangeModelBuilder:
@@ -98,29 +140,32 @@ class ChangeModelBuilder:
             if changed_file.is_binary:
                 continue
             if changed_file.language not in SYMBOL_EXTRACTOR_LANGUAGES:
-                continue
-            source, note = self._read_source(repository, diff, changed_file.path)
-            if note is not None:
-                uncertainty_notes.append(note)
-            if source is None:
                 symbols = self._symbols_from_hunk_context(changed_file)
                 imports: tuple[CodeReference, ...] = ()
                 calls: tuple[CodeReference, ...] = ()
-            elif changed_file.language == "python":
-                try:
-                    symbols, imports, calls = self._analyze_python(changed_file, source)
-                except (SyntaxError, ValueError):
+            else:
+                source, note = self._read_source(repository, diff, changed_file.path)
+                if note is not None:
+                    uncertainty_notes.append(note)
+                if source is None:
                     symbols = self._symbols_from_hunk_context(changed_file)
                     imports = ()
                     calls = ()
-                    uncertainty_notes.append(
-                        "Could not parse "
-                        f"{self._format_path(changed_file.path)} as Python; "
-                        "symbol extraction may be incomplete."
-                    )
-            else:
-                symbols, imports, calls = self._analyze_javascript(changed_file, source)
-                heuristic_paths.append(changed_file.path)
+                elif changed_file.language == "python":
+                    try:
+                        symbols, imports, calls = self._analyze_python(changed_file, source)
+                    except (SyntaxError, ValueError):
+                        symbols = self._symbols_from_hunk_context(changed_file)
+                        imports = ()
+                        calls = ()
+                        uncertainty_notes.append(
+                            "Could not parse "
+                            f"{self._format_path(changed_file.path)} as Python; "
+                            "symbol extraction may be incomplete."
+                        )
+                else:
+                    symbols, imports, calls = self._analyze_javascript(changed_file, source)
+                    heuristic_paths.append(changed_file.path)
             symbols, imports, calls, omitted = self._limit_evidence(symbols, imports, calls)
             if omitted:
                 noun = "item" if omitted == 1 else "items"
@@ -407,38 +452,66 @@ class ChangeModelBuilder:
     @staticmethod
     def _symbols_from_hunk_context(changed_file: ChangedFile) -> tuple[ChangedSymbol, ...]:
         symbols: list[ChangedSymbol] = []
+        seen: set[tuple[str, str]] = set()
         for hunk in changed_file.hunks:
             header_parts = hunk.header.split("@@", 2)
             if len(header_parts) < 3:
                 continue
             context = header_parts[2].strip()
-            python_match = _PYTHON_HUNK_SYMBOL.match(context)
-            if python_match is not None:
-                kind = "class" if python_match.group(2) == "class" else "function"
-                if python_match.group(1):
-                    kind = "async function"
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        python_match.group(3),
-                        kind,
-                        hunk.new_start,
-                        SymbolOrigin.HUNK_CONTEXT_FALLBACK,
-                    )
-                )
+            if not context:
                 continue
-            function_match = _JS_FUNCTION.match(context)
-            if function_match is not None:
-                kind = "async function" if function_match.group(1) else "function"
-                symbols.append(
-                    ChangedSymbol(
-                        changed_file.path,
-                        function_match.group(2),
-                        kind,
-                        hunk.new_start,
-                        SymbolOrigin.HUNK_CONTEXT_FALLBACK,
-                    )
+            name: str | None = None
+            kind: str | None = None
+            python_function_match = _PYTHON_HUNK_FUNCTION.match(context)
+            if python_function_match is not None:
+                kind = "function"
+                name = python_function_match.group("name")
+            else:
+                python_class_match = _PYTHON_HUNK_CLASS.match(context)
+                if python_class_match is not None:
+                    name = python_class_match.group("name")
+                    kind = "class"
+            if name is None:
+                function_match = _JS_HUNK_FUNCTION.match(context)
+                if function_match is not None:
+                    name = function_match.group("name")
+                    kind = "function"
+                else:
+                    class_match = _JS_HUNK_CLASS.match(context)
+                    if class_match is not None:
+                        name = class_match.group("name")
+                        kind = "class"
+            if name is None:
+                declaration_match = _HUNK_TYPE_DECLARATION.match(context)
+                if declaration_match is None:
+                    declaration_match = _GO_HUNK_TYPE_DECLARATION.match(context)
+                if declaration_match is not None:
+                    name = declaration_match.group("name")
+                    kind = declaration_match.group("kind")
+            if name is None:
+                for callable_pattern in (
+                    _GO_HUNK_FUNCTION,
+                    _FN_HUNK_FUNCTION,
+                    _FUN_HUNK_FUNCTION,
+                    _TYPED_HUNK_FUNCTION,
+                ):
+                    callable_match = callable_pattern.match(context)
+                    if callable_match is not None:
+                        name = callable_match.group("name").rsplit("::", maxsplit=1)[-1]
+                        kind = "function"
+                        break
+            if name is None or kind is None or (name, kind) in seen:
+                continue
+            seen.add((name, kind))
+            symbols.append(
+                ChangedSymbol(
+                    changed_file.path,
+                    name,
+                    kind,
+                    hunk.new_start,
+                    SymbolOrigin.HUNK_CONTEXT_FALLBACK,
                 )
+            )
         return tuple(symbols)
 
     @staticmethod

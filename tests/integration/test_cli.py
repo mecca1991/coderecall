@@ -68,10 +68,22 @@ def create_dart_feature_repository(directory: Path) -> None:
         cwd=directory,
         check=True,
     )
+    (directory / ".gitattributes").write_text("*.dart diff=dart\n")
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "diff.dart.xfuncname",
+            r"^[A-Za-z_][A-Za-z0-9_<>,? ]* [A-Za-z_][A-Za-z0-9_]*\(.*\).*$",
+        ],
+        cwd=directory,
+        check=True,
+    )
     source = directory / "lib" / "main.dart"
     source.parent.mkdir()
-    source.write_text("String status() => 'pending';\n")
-    subprocess.run(["git", "add", "lib/main.dart"], cwd=directory, check=True)
+    unchanged_body = "".join(f"  final marker{index} = {index};\n" for index in range(85))
+    source.write_text(f"String status() {{\n{unchanged_body}  return 'pending';\n}}\n")
+    subprocess.run(["git", "add", ".gitattributes", "lib/main.dart"], cwd=directory, check=True)
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "Add Flutter status"],
         cwd=directory,
@@ -82,7 +94,7 @@ def create_dart_feature_repository(directory: Path) -> None:
         cwd=directory,
         check=True,
     )
-    source.write_text("String status() => 'complete';\n")
+    source.write_text(f"String status() {{\n{unchanged_body}  return 'complete';\n}}\n")
     subprocess.run(["git", "add", "lib/main.dart"], cwd=directory, check=True)
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "Complete Flutter status"],
@@ -307,9 +319,11 @@ def test_review_discloses_dart_analysis_limit_in_terminal_and_default_report(
         "could not be inferred."
     ) in result.output
     assert UNSUPPORTED_DART_NOTE in result.output
+    assert 'What behavior does `status` in "lib/main.dart" modify' in result.output
 
     report = (tmp_path / "coderecall-report.md").read_text(encoding="utf-8")
     assert f"**Uncertainty**\n\n- {UNSUPPORTED_DART_NOTE}" in report
+    assert '`status` in "lib/main.dart"' in report
 
 
 def test_review_uses_dart_subjects_when_documentation_is_listed_first(

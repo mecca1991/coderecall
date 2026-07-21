@@ -16,6 +16,7 @@ from coderecall.core.types import (
     LikelySideEffect,
     QuestionCategory,
     SideEffectKind,
+    SymbolOrigin,
 )
 
 
@@ -253,6 +254,106 @@ def test_prefers_a_non_test_symbol_for_the_primary_changed_area() -> None:
 
     assert all("`process_order`" in question.prompt for question in questions)
     assert all("`test_process_order`" not in question.prompt for question in questions)
+
+
+def test_prefers_structured_symbols_over_fallback_symbols_within_source_files() -> None:
+    fallback_path = Path("lib/status.dart")
+    structured_path = Path("src/orders.py")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/structured-preference",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(path=fallback_path, status=FileStatus.MODIFIED),
+            ChangedFile(path=structured_path, status=FileStatus.MODIFIED),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=fallback_path,
+                name="refreshStatus",
+                kind="function",
+                origin=SymbolOrigin.HUNK_CONTEXT_FALLBACK,
+            ),
+            ChangedSymbol(
+                file_path=structured_path,
+                name="process_order",
+                kind="function",
+            ),
+        ),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert all('`process_order` in "src/orders.py"' in question.prompt for question in questions)
+    assert all("refreshStatus" not in question.prompt for question in questions)
+
+
+def test_preserves_source_preference_when_only_test_symbol_is_structured() -> None:
+    test_path = Path("tests/test_status.py")
+    source_path = Path("lib/status.dart")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/source-preference",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(path=test_path, status=FileStatus.MODIFIED, is_test=True),
+            ChangedFile(path=source_path, status=FileStatus.MODIFIED),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=test_path,
+                name="test_refresh_status",
+                kind="function",
+            ),
+            ChangedSymbol(
+                file_path=source_path,
+                name="refreshStatus",
+                kind="function",
+                line_start=12,
+                origin=SymbolOrigin.HUNK_CONTEXT_FALLBACK,
+            ),
+        ),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert all('`refreshStatus` in "lib/status.dart"' in question.prompt for question in questions)
+    assert all("test_refresh_status" not in question.prompt for question in questions)
+
+
+def test_uses_fallback_symbol_and_file_in_all_questions_when_it_is_only_evidence() -> None:
+    source_path = Path("lib/status.dart")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/fallback-only",
+        base_branch="main",
+        changed_files=(ChangedFile(path=source_path, status=FileStatus.MODIFIED),),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=source_path,
+                name="refreshStatus",
+                kind="function",
+                line_start=12,
+                origin=SymbolOrigin.HUNK_CONTEXT_FALLBACK,
+            ),
+        ),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert all('`refreshStatus` in "lib/status.dart"' in question.prompt for question in questions)
+    assert all(
+        question.references
+        == (
+            EvidenceCitation(
+                kind="symbol",
+                file_path=source_path,
+                symbol="refreshStatus",
+                line_start=12,
+            ),
+        )
+        for question in questions
+    )
 
 
 def test_behavior_question_describes_a_deleted_symbol_as_removed() -> None:

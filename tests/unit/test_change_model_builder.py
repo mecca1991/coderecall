@@ -574,6 +574,183 @@ def test_uses_hunk_context_when_python_source_is_invalid(tmp_path: Path) -> None
     assert any("Could not parse" in note for note in context.uncertainty_notes)
 
 
+def test_extracts_unsupported_callable_hunk_context_without_reading_source(
+    tmp_path: Path,
+) -> None:
+    contexts = (
+        ("lib/status.dart", "Future<void> refreshStatus() async {", "refreshStatus", 14),
+        (
+            "cmd/service.go",
+            "func (service *Service) Refresh(ctx context.Context) error {",
+            "Refresh",
+            28,
+        ),
+        (
+            "crates/orders.rs",
+            "pub fn reconcile_order(order: &Order) -> Result<()> {",
+            "reconcile_order",
+            42,
+        ),
+        (
+            "native/status.c",
+            "const char *format_status(int value) {",
+            "format_status",
+            56,
+        ),
+        (
+            "scripts/tasks.custom",
+            "export default async function* streamTasks() {",
+            "streamTasks",
+            70,
+        ),
+        (
+            "native/Status.cs",
+            "public override string FormatStatus(int value) {",
+            "FormatStatus",
+            84,
+        ),
+    )
+    changed_files = tuple(
+        ChangedFile(
+            path=Path(path),
+            status=FileStatus.MODIFIED,
+            hunks=(
+                DiffHunk(
+                    file_path=Path(path),
+                    header=f"@@ -{line},3 +{line},3 @@ {context}",
+                    new_start=line,
+                ),
+            ),
+        )
+        for path, context, _, line in contexts
+    )
+    builder = ChangeModelBuilder()
+
+    def fail_if_source_is_read(*args: object, **kwargs: object) -> tuple[None, None]:
+        raise AssertionError("unsupported-language source must not be read")
+
+    builder._read_source = fail_if_source_is_read  # type: ignore[method-assign]
+
+    context = builder.build(
+        RepositoryContext(root=tmp_path, current_branch="feature/fallback-symbols"),
+        "main",
+        DiffCollection(merge_base="abc123", changed_files=changed_files),
+    )
+
+    assert [
+        (symbol.name, symbol.kind, symbol.line_start, symbol.origin)
+        for symbol in context.changed_symbols
+    ] == [
+        (name, "function", line, SymbolOrigin.HUNK_CONTEXT_FALLBACK)
+        for _, _, name, line in contexts
+    ]
+
+
+def test_extracts_unsupported_type_declarations_from_hunk_context() -> None:
+    declarations = (
+        ("class CheckoutService {", "CheckoutService", "class"),
+        ("enum PaymentState {", "PaymentState", "enum"),
+        ("mixin Auditable {", "Auditable", "mixin"),
+        ("extension StatusText on String {", "StatusText", "extension"),
+        ("struct Receipt {", "Receipt", "struct"),
+        ("interface Gateway {", "Gateway", "interface"),
+        ("trait Persistable {", "Persistable", "trait"),
+        ("record PaymentResult(String id) {}", "PaymentResult", "record"),
+        ("type Server struct {", "Server", "struct"),
+    )
+    path = Path("src/models.custom")
+    hunks = tuple(
+        DiffHunk(
+            file_path=path,
+            header=f"@@ -{line},2 +{line},2 @@ {declaration}",
+            new_start=line,
+        )
+        for line, (declaration, _, _) in enumerate(declarations, start=10)
+    )
+
+    context = ChangeModelBuilder().build(
+        RepositoryContext(root=Path("/repo"), current_branch="feature/types"),
+        "main",
+        DiffCollection(
+            merge_base="abc123",
+            changed_files=(ChangedFile(path=path, status=FileStatus.MODIFIED, hunks=hunks),),
+        ),
+    )
+
+    assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
+        (name, kind) for _, name, kind in declarations
+    ]
+    assert all(
+        symbol.origin is SymbolOrigin.HUNK_CONTEXT_FALLBACK for symbol in context.changed_symbols
+    )
+
+
+def test_rejects_unsafe_hunk_context_and_deduplicates_first_symbol_occurrence() -> None:
+    path = Path("lib/status.dart")
+    contexts = (
+        "",
+        "if (ready) {",
+        "refreshStatus();",
+        "result = refreshStatus();",
+        "This prose mentions refreshStatus() but is not a declaration.",
+        "def incomplete(",
+        "function incomplete(",
+        "class CheckoutService is described here",
+        "Future<void> Service.refreshStatus() {",
+        "Future<void> refreshStatus() async {",
+        "Future<void> refreshStatus() async {",
+        "void refreshStatus() {",
+    )
+    hunks = tuple(
+        DiffHunk(
+            file_path=path,
+            header=f"@@ -{line},2 +{line},2 @@ {hunk_context}".rstrip(),
+            new_start=line,
+        )
+        for line, hunk_context in enumerate(contexts, start=20)
+    )
+
+    context = ChangeModelBuilder().build(
+        RepositoryContext(root=Path("/repo"), current_branch="feature/deduplicate"),
+        "main",
+        DiffCollection(
+            merge_base="abc123",
+            changed_files=(ChangedFile(path=path, status=FileStatus.MODIFIED, hunks=hunks),),
+        ),
+    )
+
+    assert [
+        (symbol.name, symbol.kind, symbol.line_start) for symbol in context.changed_symbols
+    ] == [("refreshStatus", "function", 29)]
+
+
+def test_limits_unsupported_hunk_symbols_and_reports_omissions() -> None:
+    path = Path("lib/status.dart")
+    hunks = tuple(
+        DiffHunk(
+            file_path=path,
+            header=f"@@ -{line},2 +{line},2 @@ void action{line}() {{",
+            new_start=line,
+        )
+        for line in range(10, 13)
+    )
+
+    context = ChangeModelBuilder(max_evidence_per_file=2).build(
+        RepositoryContext(root=Path("/repo"), current_branch="feature/limit"),
+        "main",
+        DiffCollection(
+            merge_base="abc123",
+            changed_files=(ChangedFile(path=path, status=FileStatus.MODIFIED, hunks=hunks),),
+        ),
+    )
+
+    assert [(symbol.name, symbol.line_start) for symbol in context.changed_symbols] == [
+        ("action10", 10),
+        ("action11", 11),
+    ]
+    assert any("Omitted 1 evidence item" in note for note in context.uncertainty_notes)
+
+
 def test_bounds_source_reads_and_reports_unsupported_languages(tmp_path: Path) -> None:
     large_path = tmp_path / "src" / "large.py"
     large_path.parent.mkdir()
