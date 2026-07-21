@@ -98,6 +98,12 @@ def test_changed_symbol_defaults_to_language_extractor_origin() -> None:
     assert symbol.origin is SymbolOrigin.LANGUAGE_EXTRACTOR
 
 
+def test_changed_file_defaults_to_non_documentation() -> None:
+    changed_file = ChangedFile(path=Path("src/payments.py"), status=FileStatus.MODIFIED)
+
+    assert changed_file.is_documentation is False
+
+
 def test_question_answer_assessment_and_report_payload() -> None:
     citation = EvidenceCitation(
         kind="file",

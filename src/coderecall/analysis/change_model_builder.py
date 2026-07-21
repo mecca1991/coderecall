@@ -29,6 +29,8 @@ from coderecall.core.types import (
 from coderecall.git.git_adapter import GitAdapter
 
 _TEST_DIRECTORIES = frozenset({"test", "tests", "__tests__"})
+_DOCUMENTATION_DIRECTORIES = frozenset({"docs"})
+_PLAN_TOKEN = re.compile(r"(?:^|[^a-z0-9])plan(?:[^a-z0-9]|$)", re.IGNORECASE)
 _JS_FUNCTION = re.compile(
     r"^\s*(?:export\s+)?(?:default\s+)?(?:(async)\s+)?function\s+([A-Za-z_$][\w$]*)"
 )
@@ -519,7 +521,23 @@ class ChangeModelBuilder:
     def _classify_file(changed_file: ChangedFile) -> ChangedFile:
         language = recognize_language(changed_file.path, changed_file.language)
         is_test = changed_file.is_test or ChangeModelBuilder._is_test_path(changed_file.path)
-        return replace(changed_file, language=language, is_test=is_test)
+        is_documentation = changed_file.is_documentation or (
+            ChangeModelBuilder._is_documentation_path(changed_file.path)
+        )
+        return replace(
+            changed_file,
+            language=language,
+            is_test=is_test,
+            is_documentation=is_documentation,
+        )
+
+    @staticmethod
+    def _is_documentation_path(path: Path) -> bool:
+        if any(part.lower() in _DOCUMENTATION_DIRECTORIES for part in path.parts[:-1]):
+            return True
+        if path.suffix.lower() in {".md", ".markdown"}:
+            return True
+        return _PLAN_TOKEN.search(path.name) is not None
 
     @staticmethod
     def _is_test_path(path: Path) -> bool:

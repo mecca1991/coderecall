@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from coderecall.core.errors import QuestionGenerationUnavailable
+from coderecall.core.errors import DocumentationOnlyChanges, QuestionGenerationUnavailable
 from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
@@ -32,6 +32,10 @@ class QuestionGenerator:
         if not context.changed_files:
             raise QuestionGenerationUnavailable(
                 "Question generation requires at least one meaningful changed file."
+            )
+        if all(changed_file.is_documentation for changed_file in context.changed_files):
+            raise DocumentationOnlyChanges(
+                "Changed files contain only documentation or planning changes."
             )
 
         analysis_files = self._analyzable_files(context)
@@ -94,6 +98,7 @@ class QuestionGenerator:
             changed_file
             for changed_file in context.changed_files
             if not changed_file.is_binary
+            and not changed_file.is_documentation
             and (
                 bool(changed_file.hunks)
                 or changed_file.path in hunk_paths

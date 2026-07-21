@@ -17,7 +17,11 @@ from coderecall.analysis import (
 from coderecall.cli.error_rendering import exit_with_error
 from coderecall.cli.terminal_session import TerminalSessionAdapter
 from coderecall.config import ConfigLoader, resolve_review_options
-from coderecall.core.errors import CodeRecallError, QuestionGenerationUnavailable
+from coderecall.core.errors import (
+    CodeRecallError,
+    DocumentationOnlyChanges,
+    QuestionGenerationUnavailable,
+)
 from coderecall.core.types import ModelMode
 from coderecall.evaluation import FollowUpSelector, HeuristicEvaluator
 from coderecall.git import DiffCollector, GitAdapter
@@ -105,6 +109,9 @@ def review_command(
 
     try:
         generated_questions = QuestionGenerator().generate(context)
+    except DocumentationOnlyChanges as error:
+        terminal.render_stop_message(error.message)
+        return
     except QuestionGenerationUnavailable:
         terminal.render_stop_message("Changed files contain no analyzable question evidence.")
         return

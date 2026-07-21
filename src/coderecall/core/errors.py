@@ -41,6 +41,10 @@ class QuestionGenerationUnavailable(CodeRecallError):
     """Raised when a change lacks evidence for branch-specific questions."""
 
 
+class DocumentationOnlyChanges(QuestionGenerationUnavailable):
+    """Raised when documentation is the only meaningful branch change."""
+
+
 class GitCommandFailed(CodeRecallError):
     """Raised when a Git command cannot be executed successfully."""
 
