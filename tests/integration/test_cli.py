@@ -91,6 +91,48 @@ def create_dart_feature_repository(directory: Path) -> None:
     )
 
 
+def add_documentation_change(directory: Path) -> None:
+    readme = directory / "README.md"
+    readme.write_text("# Release plan\n\nCall `client.post()` before `status()`.\n")
+    subprocess.run(["git", "add", "README.md"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Document release plan"],
+        cwd=directory,
+        check=True,
+    )
+
+
+def create_documentation_only_feature_repository(directory: Path) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=directory, check=True)
+    subprocess.run(["git", "checkout", "--quiet", "-b", "main"], cwd=directory, check=True)
+    subprocess.run(["git", "config", "user.name", "CodeRecall Tests"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@coderecall.local"],
+        cwd=directory,
+        check=True,
+    )
+    readme = directory / "README.md"
+    readme.write_text("# Project\n")
+    subprocess.run(["git", "add", "README.md"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Add project documentation"],
+        cwd=directory,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "feature/release-plan"],
+        cwd=directory,
+        check=True,
+    )
+    readme.write_text("# Project\n\n## Release plan\n\nShip after verification.\n")
+    subprocess.run(["git", "add", "README.md"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Add release plan"],
+        cwd=directory,
+        check=True,
+    )
+
+
 def test_root_help_lists_commands() -> None:
     result = runner.invoke(app, ["--help"])
 
@@ -268,6 +310,49 @@ def test_review_discloses_dart_analysis_limit_in_terminal_and_default_report(
 
     report = (tmp_path / "coderecall-report.md").read_text(encoding="utf-8")
     assert f"**Uncertainty**\n\n- {UNSUPPORTED_DART_NOTE}" in report
+
+
+def test_review_uses_dart_subjects_when_documentation_is_listed_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_dart_feature_repository(tmp_path)
+    add_documentation_change(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["review", "--base", "main", "--questions", "3", "--no-follow-up", "--plain"],
+        input="\n\n\n",
+    )
+
+    assert result.exit_code == 0
+    assert result.output.index('added: "README.md"') < result.output.index(
+        'modified: "lib/main.dart"'
+    )
+    question_output = result.output.split("Question 1/3", maxsplit=1)[1]
+    assert question_output.count('"lib/main.dart"') >= 3
+    assert '"README.md"' not in question_output
+
+
+def test_review_stops_for_documentation_only_changes_without_writing_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_documentation_only_feature_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["review", "--base", "main", "--plain"])
+
+    assert result.exit_code == 0
+    assert 'modified: "README.md"' in result.output
+    assert "Change summary" in result.output
+    assert (
+        "Review stopped\nChanged files contain only documentation or planning changes."
+        in result.output
+    )
+    assert "Question 1" not in result.output
+    assert not (tmp_path / "coderecall-report.md").exists()
 
 
 def test_review_preserves_session_output_when_report_write_fails(

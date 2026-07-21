@@ -106,6 +106,7 @@ class ChangedFile:
     is_binary: bool = False
     is_test: bool = False
     hunks: tuple[DiffHunk, ...] = ()
+    is_documentation: bool = False
 
 
 @dataclass(frozen=True)

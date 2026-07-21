@@ -10,6 +10,7 @@ from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
     ChangedSymbol,
+    DiffHunk,
     EvidenceCitation,
     FileStatus,
     LikelySideEffect,
@@ -294,4 +295,134 @@ def test_refuses_binary_only_context_without_analyzable_evidence() -> None:
     )
 
     with pytest.raises(QuestionGenerationUnavailable, match="analyzable change evidence"):
+        QuestionGenerator().generate(context)
+
+
+def test_excludes_documentation_from_all_question_candidates() -> None:
+    documentation_path = Path("docs/release-plan.py")
+    source_path = Path("src/orders.py")
+    test_path = Path("tests/test_orders.py")
+    documentation_effect = EvidenceCitation(
+        kind="call",
+        file_path=documentation_path,
+        symbol="client.post",
+    )
+    source_effect = EvidenceCitation(
+        kind="call",
+        file_path=source_path,
+        symbol="database.update",
+    )
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/order-processing",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=documentation_path,
+                status=FileStatus.MODIFIED,
+                is_documentation=True,
+            ),
+            ChangedFile(path=source_path, status=FileStatus.MODIFIED),
+            ChangedFile(path=test_path, status=FileStatus.ADDED, is_test=True),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=documentation_path,
+                name="synthetic_documentation_symbol",
+                kind="function",
+            ),
+            ChangedSymbol(
+                file_path=source_path,
+                name="process_order",
+                kind="function",
+                line_start=12,
+            ),
+        ),
+        related_tests=(documentation_path, test_path),
+        likely_side_effects=(
+            LikelySideEffect(
+                kind=SideEffectKind.NETWORK_CALL,
+                description="Documentation contains a synthetic network signal.",
+                evidence=(documentation_effect,),
+            ),
+            LikelySideEffect(
+                kind=SideEffectKind.DATABASE_WRITE,
+                description="Source contains a database signal.",
+                evidence=(source_effect,),
+            ),
+        ),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert '`process_order` in "src/orders.py"' in questions[0].prompt
+    assert "likely database write" in questions[1].prompt
+    assert '`database.update` in "src/orders.py"' in questions[1].prompt
+    assert '"tests/test_orders.py"' in questions[2].prompt
+    assert '`process_order` in "src/orders.py"' in questions[2].prompt
+    assert all(
+        citation.file_path != documentation_path
+        for question in questions
+        for citation in question.references
+    )
+
+
+def test_uses_changed_test_when_it_is_the_only_eligible_subject() -> None:
+    documentation_path = Path("README.md")
+    test_path = Path("tests/test_checkout.dart")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/test-only",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=documentation_path,
+                status=FileStatus.MODIFIED,
+                is_documentation=True,
+            ),
+            ChangedFile(path=test_path, status=FileStatus.MODIFIED, is_test=True),
+        ),
+        related_tests=(test_path,),
+        diff_hunks=(
+            DiffHunk(file_path=documentation_path, header="@@ -1 +1 @@"),
+            DiffHunk(file_path=test_path, header="@@ -1 +1 @@"),
+        ),
+    )
+
+    questions = QuestionGenerator().generate(context)
+
+    assert all('"tests/test_checkout.dart"' in question.prompt for question in questions)
+    assert all(
+        citation.file_path == test_path
+        for question in questions
+        for citation in question.references
+    )
+
+
+def test_refuses_documentation_only_context_with_specific_reason() -> None:
+    documentation_path = Path("docs/release-plan.md")
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/docs-only",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=documentation_path,
+                status=FileStatus.MODIFIED,
+                is_documentation=True,
+            ),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=documentation_path,
+                name="synthetic_documentation_symbol",
+                kind="function",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        QuestionGenerationUnavailable,
+        match="Changed files contain only documentation or planning changes\\.",
+    ):
         QuestionGenerator().generate(context)

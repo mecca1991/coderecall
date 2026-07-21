@@ -98,6 +98,67 @@ def test_classifies_languages_and_changed_tests_in_diff_order() -> None:
     )
 
 
+def test_classifies_documentation_paths_and_plan_tokens_without_near_matches() -> None:
+    changed_files = tuple(
+        ChangedFile(path=Path(path), status=FileStatus.MODIFIED)
+        for path in (
+            "docs/guide.txt",
+            "packages/DoCs/setup.yaml",
+            "README.MD",
+            "notes/design.MarkDown",
+            "PLAN",
+            "release-plan.txt",
+            "IMPLEMENTATION_PLAN.yaml",
+            "src/explain.py",
+            "src/planner.py",
+        )
+    )
+    repository = RepositoryContext(root=Path("/repo"), current_branch="feature/docs")
+
+    context = ChangeModelBuilder().build(
+        repository,
+        "main",
+        DiffCollection(merge_base="abc123", changed_files=changed_files),
+    )
+
+    by_path = {changed.path: changed.is_documentation for changed in context.changed_files}
+    assert by_path == {
+        Path("docs/guide.txt"): True,
+        Path("packages/DoCs/setup.yaml"): True,
+        Path("README.MD"): True,
+        Path("notes/design.MarkDown"): True,
+        Path("PLAN"): True,
+        Path("release-plan.txt"): True,
+        Path("IMPLEMENTATION_PLAN.yaml"): True,
+        Path("src/explain.py"): False,
+        Path("src/planner.py"): False,
+    }
+
+
+def test_classifies_rename_by_destination_path() -> None:
+    changed_files = (
+        ChangedFile(
+            path=Path("src/runtime.py"),
+            old_path=Path("docs/runtime.md"),
+            status=FileStatus.RENAMED,
+        ),
+        ChangedFile(
+            path=Path("docs/runtime.md"),
+            old_path=Path("src/runtime.py"),
+            status=FileStatus.RENAMED,
+        ),
+    )
+    repository = RepositoryContext(root=Path("/repo"), current_branch="feature/renames")
+
+    context = ChangeModelBuilder().build(
+        repository,
+        "main",
+        DiffCollection(merge_base="abc123", changed_files=changed_files),
+    )
+
+    assert [changed.is_documentation for changed in context.changed_files] == [False, True]
+
+
 def test_recognizes_unsupported_languages_without_claiming_extractor_support() -> None:
     changed_files = (
         ChangedFile(path=Path("lib/main.dart"), status=FileStatus.MODIFIED),
