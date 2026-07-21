@@ -55,7 +55,7 @@ _PYTHON_HUNK_FUNCTION = re.compile(
 )
 _PYTHON_HUNK_CLASS = re.compile(r"^\s*class\s+(?P<name>[A-Za-z_]\w*)\s*(?:\([^)]*\))?\s*:")
 _JS_HUNK_FUNCTION = re.compile(
-    r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+"
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function(?:\s*\*\s*|\s+)"
     r"(?P<name>[A-Za-z_$][\w$]*)\s*(?:<[^;={}()]*>)?\s*\([^)]*\)\s*"
     r"(?::[^{};=]+)?\s*\{"
 )
@@ -85,7 +85,7 @@ _FUN_HUNK_FUNCTION = re.compile(
 )
 _TYPED_HUNK_FUNCTION = re.compile(
     r"^\s*(?:(?:abstract|async|const|constexpr|extern|external|final|inline|internal|long|native|"
-    r"private|protected|public|short|signed|static|synchronized|unsigned|virtual)\s+)*"
+    r"override|private|protected|public|short|signed|static|synchronized|unsigned|virtual)\s+)*"
     r"[A-Za-z_][\w.:]*(?:\s*<[^;={}()]+>)?(?:\s*\[\s*\])*(?:\s*[?*&]+\s*|\s+)"
     r"(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*"
     r"(?:<[^;={}()]*>)?\s*\([^;={}()]*\)\s*"

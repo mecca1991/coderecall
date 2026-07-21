@@ -597,6 +597,18 @@ def test_extracts_unsupported_callable_hunk_context_without_reading_source(
             "format_status",
             56,
         ),
+        (
+            "scripts/tasks.custom",
+            "export default async function* streamTasks() {",
+            "streamTasks",
+            70,
+        ),
+        (
+            "native/Status.cs",
+            "public override string FormatStatus(int value) {",
+            "FormatStatus",
+            84,
+        ),
     )
     changed_files = tuple(
         ChangedFile(
@@ -684,6 +696,7 @@ def test_rejects_unsafe_hunk_context_and_deduplicates_first_symbol_occurrence() 
         "def incomplete(",
         "function incomplete(",
         "class CheckoutService is described here",
+        "Future<void> Service.refreshStatus() {",
         "Future<void> refreshStatus() async {",
         "Future<void> refreshStatus() async {",
         "void refreshStatus() {",
@@ -708,7 +721,7 @@ def test_rejects_unsafe_hunk_context_and_deduplicates_first_symbol_occurrence() 
 
     assert [
         (symbol.name, symbol.kind, symbol.line_start) for symbol in context.changed_symbols
-    ] == [("refreshStatus", "function", 28)]
+    ] == [("refreshStatus", "function", 29)]
 
 
 def test_limits_unsupported_hunk_symbols_and_reports_omissions() -> None:
