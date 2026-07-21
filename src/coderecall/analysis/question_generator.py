@@ -16,6 +16,7 @@ from coderecall.core.types import (
     Question,
     QuestionCategory,
     SideEffectKind,
+    SymbolOrigin,
 )
 
 _EXTERNAL_EFFECT_PRIORITY = (
@@ -51,10 +52,7 @@ class QuestionGenerator:
         valid_symbols = tuple(
             symbol for symbol in context.changed_symbols if symbol.file_path in changed_paths
         )
-        primary_symbol = next(
-            (symbol for symbol in valid_symbols if symbol.file_path in non_test_paths),
-            valid_symbols[0] if valid_symbols else None,
-        )
+        primary_symbol = self._primary_symbol(valid_symbols, non_test_paths)
         primary_path = (
             primary_symbol.file_path
             if primary_symbol is not None
@@ -105,6 +103,23 @@ class QuestionGenerator:
                 or changed_file.path in structured_paths
             )
         )
+
+    @staticmethod
+    def _primary_symbol(
+        symbols: tuple[ChangedSymbol, ...],
+        non_test_paths: set[Path],
+    ) -> ChangedSymbol | None:
+        if not symbols:
+            return None
+        _, symbol = min(
+            enumerate(symbols),
+            key=lambda item: (
+                item[1].file_path not in non_test_paths,
+                item[1].origin is SymbolOrigin.HUNK_CONTEXT_FALLBACK,
+                item[0],
+            ),
+        )
+        return symbol
 
     @staticmethod
     def _behavior_question(
