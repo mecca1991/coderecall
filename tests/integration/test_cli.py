@@ -24,6 +24,10 @@ PRIVACY_DISCLOSURE = (
     "CodeRecall sends no telemetry and makes no network requests.\n"
     "\n"
 )
+UNSUPPORTED_DART_NOTE = (
+    "Symbol-level analysis was unavailable for Dart (.dart); any symbols inferred from hunk "
+    "context are heuristic."
+)
 
 
 def create_python_feature_repository(directory: Path) -> None:
@@ -50,6 +54,38 @@ def create_python_feature_repository(directory: Path) -> None:
     subprocess.run(["git", "add", "checkout.py"], cwd=directory, check=True)
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "Complete processed orders"],
+        cwd=directory,
+        check=True,
+    )
+
+
+def create_dart_feature_repository(directory: Path) -> None:
+    subprocess.run(["git", "init", "--quiet"], cwd=directory, check=True)
+    subprocess.run(["git", "checkout", "--quiet", "-b", "main"], cwd=directory, check=True)
+    subprocess.run(["git", "config", "user.name", "CodeRecall Tests"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@coderecall.local"],
+        cwd=directory,
+        check=True,
+    )
+    source = directory / "lib" / "main.dart"
+    source.parent.mkdir()
+    source.write_text("String status() => 'pending';\n")
+    subprocess.run(["git", "add", "lib/main.dart"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Add Flutter status"],
+        cwd=directory,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-b", "feature/complete-status"],
+        cwd=directory,
+        check=True,
+    )
+    source.write_text("String status() => 'complete';\n")
+    subprocess.run(["git", "add", "lib/main.dart"], cwd=directory, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Complete Flutter status"],
         cwd=directory,
         check=True,
     )
@@ -150,7 +186,10 @@ def test_review_reports_repository_context(
     assert "Changes: 1 total, 1 analyzed, 0 filtered" in result.output
     assert '  - modified: "tracked.txt"' in result.output
     assert "Change summary" in result.output
-    assert "Purpose: Likely updates code in 1 meaningful file." in result.output
+    assert (
+        "Purpose: Likely updates 1 meaningful file across .txt; a symbol-level purpose could "
+        "not be inferred."
+    ) in result.output
     assert result.output.index("Change summary") < result.output.index("Question 1/3 — Behavior")
     assert "Skipped." in result.output
     assert "End of input: 2 remaining questions skipped." in result.output
@@ -204,6 +243,31 @@ def test_review_writes_custom_report_relative_to_invocation_directory(
     assert "## Review Talking Points\n\n- Explain the change:" in report
     assert "No review talking points generated." not in report
     assert "Explain the change:" not in result.output
+
+
+def test_review_discloses_dart_analysis_limit_in_terminal_and_default_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_dart_feature_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["review", "--base", "main", "--questions", "1", "--no-follow-up", "--plain"],
+        input="\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Likely updates code in 1 meaningful file." not in result.output
+    assert (
+        "Purpose: Likely updates 1 meaningful file across Dart (.dart); a symbol-level purpose "
+        "could not be inferred."
+    ) in result.output
+    assert UNSUPPORTED_DART_NOTE in result.output
+
+    report = (tmp_path / "coderecall-report.md").read_text(encoding="utf-8")
+    assert f"**Uncertainty**\n\n- {UNSUPPORTED_DART_NOTE}" in report
 
 
 def test_review_preserves_session_output_when_report_write_fails(

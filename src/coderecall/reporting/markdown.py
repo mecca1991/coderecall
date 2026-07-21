@@ -28,9 +28,17 @@ class MarkdownReportWriter:
             "## Change Summary",
             "",
             report.diff_summary,
-            "",
-            "## Questions and Answers",
         ]
+        if report.summary_uncertainty_notes:
+            lines.extend(
+                [
+                    "",
+                    "**Uncertainty**",
+                    "",
+                    *self._items(report.summary_uncertainty_notes, ""),
+                ]
+            )
+        lines.extend(["", "## Questions and Answers"])
         for index, (question, answer, assessment) in enumerate(
             zip(report.questions, report.answers, report.assessments, strict=True),
             start=1,

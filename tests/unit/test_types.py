@@ -11,6 +11,7 @@ from coderecall.core.types import (
     AssessmentLabel,
     ChangeContext,
     ChangedFile,
+    ChangedSymbol,
     EvidenceCitation,
     FileStatus,
     LikelySideEffect,
@@ -19,6 +20,7 @@ from coderecall.core.types import (
     QuestionCategory,
     Report,
     SideEffectKind,
+    SymbolOrigin,
 )
 
 
@@ -84,6 +86,16 @@ def test_change_context_captures_changed_and_filtered_files() -> None:
     assert context.changed_files == (changed_file,)
     assert context.likely_side_effects == (side_effect,)
     assert context.uncertainty_notes
+
+
+def test_changed_symbol_defaults_to_language_extractor_origin() -> None:
+    symbol = ChangedSymbol(
+        file_path=Path("app/payments.py"),
+        name="create_payment",
+        kind="function",
+    )
+
+    assert symbol.origin is SymbolOrigin.LANGUAGE_EXTRACTOR
 
 
 def test_question_answer_assessment_and_report_payload() -> None:

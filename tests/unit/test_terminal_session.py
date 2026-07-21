@@ -279,6 +279,28 @@ def test_plain_session_has_stable_readable_multiline_output() -> None:
     assert "[bold]" not in output.getvalue()
 
 
+def test_summary_always_surfaces_language_limit_among_other_uncertainty_notes() -> None:
+    output = StringIO()
+    terminal = TerminalSessionAdapter(output_stream=output, plain=True)
+    language_limit = (
+        "Symbol-level analysis was unavailable for Dart (.dart); any symbols inferred from "
+        "hunk context are heuristic."
+    )
+    summary = DiffSummary(
+        purpose="Summary.",
+        uncertainty_notes=(
+            "The first unrelated note.",
+            "The second unrelated note.",
+            "The third unrelated note.",
+            language_limit,
+        ),
+    )
+
+    terminal.render_diff_summary(summary)
+
+    assert language_limit in output.getvalue()
+
+
 def test_stop_message_uses_an_explicit_heading() -> None:
     output = StringIO()
     terminal = TerminalSessionAdapter(output_stream=output, plain=True)

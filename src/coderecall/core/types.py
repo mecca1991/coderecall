@@ -67,6 +67,13 @@ class SideEffectKind(StrEnum):
     MESSAGE_PUBLISH = "message publish"
 
 
+class SymbolOrigin(StrEnum):
+    """How a changed symbol was identified."""
+
+    LANGUAGE_EXTRACTOR = "language extractor"
+    HUNK_CONTEXT_FALLBACK = "hunk context fallback"
+
+
 @dataclass(frozen=True)
 class RepositoryContext:
     """The Git repository containing the current CodeRecall invocation."""
@@ -161,6 +168,7 @@ class ChangedSymbol:
     name: str
     kind: str
     line_start: int | None = None
+    origin: SymbolOrigin = SymbolOrigin.LANGUAGE_EXTRACTOR
 
 
 @dataclass(frozen=True)
@@ -260,6 +268,7 @@ class Report:
     assessments: tuple[Assessment, ...]
     follow_up: FollowUp | None = None
     review_talking_points: tuple[str, ...] = ()
+    summary_uncertainty_notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
