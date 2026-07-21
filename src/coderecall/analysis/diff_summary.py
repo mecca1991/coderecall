@@ -6,6 +6,11 @@ from collections.abc import Hashable, Iterable
 from pathlib import Path
 from typing import TypeVar
 
+from coderecall.analysis.languages import (
+    format_language_list,
+    has_symbol_extractor,
+    unsupported_language_labels,
+)
 from coderecall.core.types import (
     ChangeContext,
     ChangedFile,
@@ -14,6 +19,7 @@ from coderecall.core.types import (
     FileStatus,
     LikelySideEffect,
     SideEffectKind,
+    SymbolOrigin,
 )
 
 _MAX_RELEVANT_FILES = 5
@@ -28,10 +34,13 @@ class DiffSummaryService:
         symbols = tuple(
             symbol for symbol in context.changed_symbols if symbol.file_path in changed_paths
         )
+        purpose_symbols = tuple(
+            symbol for symbol in symbols if symbol.origin is SymbolOrigin.LANGUAGE_EXTRACTOR
+        )
         side_effects = self._sanitize_side_effects(context.likely_side_effects, changed_paths)
 
         return DiffSummary(
-            purpose=self._purpose(context.changed_files, symbols, side_effects),
+            purpose=self._purpose(context.changed_files, purpose_symbols, side_effects),
             relevant_files=self._relevant_files(context.changed_files, symbols, side_effects),
             tests=self._deduplicate(
                 path for path in context.related_tests if path in changed_paths
@@ -48,6 +57,24 @@ class DiffSummaryService:
     ) -> str:
         if not changed_files:
             return "No meaningful code changes were available to summarize."
+
+        non_binary_files = tuple(
+            changed_file for changed_file in changed_files if not changed_file.is_binary
+        )
+        unsupported_languages = unsupported_language_labels(non_binary_files)
+        if (
+            non_binary_files
+            and unsupported_languages
+            and not any(has_symbol_extractor(changed_file) for changed_file in non_binary_files)
+        ):
+            file_count = len(non_binary_files)
+            file_label = "meaningful file" if file_count == 1 else "meaningful files"
+            action = DiffSummaryService._status_action(non_binary_files)
+            return (
+                f"Likely {action} {file_count} {file_label} across "
+                f"{format_language_list(unsupported_languages)}; a symbol-level purpose could "
+                "not be inferred."
+            )
 
         file_count = len(changed_files)
         file_label = "meaningful file" if file_count == 1 else "meaningful files"

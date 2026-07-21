@@ -12,6 +12,7 @@ from typing import TextIO
 from rich.console import Console
 from rich.text import Text
 
+from coderecall.analysis.languages import UNSUPPORTED_LANGUAGE_NOTE_PREFIX
 from coderecall.core.types import (
     Answer,
     ChangedFile,
@@ -121,10 +122,11 @@ class TerminalSessionAdapter:
                 )
         if summary.uncertainty_notes:
             self._print("Uncertainty:")
-            for note in summary.uncertainty_notes[:3]:
+            ordered_notes = self._prioritize_language_limit(summary.uncertainty_notes)
+            for note in ordered_notes[:3]:
                 self._print(f"  - {note}")
-            if len(summary.uncertainty_notes) > 3:
-                self._print(f"  - and {len(summary.uncertainty_notes) - 3} more notes")
+            if len(ordered_notes) > 3:
+                self._print(f"  - and {len(ordered_notes) - 3} more notes")
         self._print()
 
     def render_stop_message(self, message: str) -> None:
@@ -283,3 +285,13 @@ class TerminalSessionAdapter:
         if line.endswith("\n"):
             return line[:-1]
         return line
+
+    @staticmethod
+    def _prioritize_language_limit(notes: tuple[str, ...]) -> tuple[str, ...]:
+        language_limit = next(
+            (note for note in notes if note.startswith(UNSUPPORTED_LANGUAGE_NOTE_PREFIX)),
+            None,
+        )
+        if language_limit is None or notes[0] == language_limit:
+            return notes
+        return (language_limit, *(note for note in notes if note != language_limit))

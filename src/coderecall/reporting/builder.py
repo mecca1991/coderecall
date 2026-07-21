@@ -64,6 +64,7 @@ class ReportBuilder:
             questions=tuple(questions),
             answers=tuple(answers_by_id[question_id] for question_id in question_ids),
             assessments=tuple(assessments_by_id[question_id] for question_id in question_ids),
+            summary_uncertainty_notes=summary.uncertainty_notes,
             follow_up=follow_up,
             review_talking_points=tuple(review_talking_points),
         )

@@ -13,6 +13,7 @@ from coderecall.core.types import (
     FilteredFile,
     FilterReason,
     RepositoryContext,
+    SymbolOrigin,
 )
 
 
@@ -94,6 +95,69 @@ def test_classifies_languages_and_changed_tests_in_diff_order() -> None:
     assert context.related_tests == (
         Path("tests/unit/test_payments.py"),
         Path("web/__tests__/checkout.test.ts"),
+    )
+
+
+def test_recognizes_unsupported_languages_without_claiming_extractor_support() -> None:
+    changed_files = (
+        ChangedFile(path=Path("lib/main.dart"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("cmd/server.go"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("README.md"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("config/app.yaml"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("config/data.json"), status=FileStatus.MODIFIED),
+    )
+    repository = RepositoryContext(root=Path("/repo"), current_branch="feature/languages")
+
+    context = ChangeModelBuilder().build(
+        repository,
+        "main",
+        DiffCollection(merge_base="abc123", changed_files=changed_files),
+    )
+
+    assert [changed_file.language for changed_file in context.changed_files] == [
+        "dart",
+        "go",
+        "markdown",
+        "yaml",
+        "json",
+    ]
+
+
+def test_prepends_deduplicated_unsupported_language_disclosure_in_change_order(
+    tmp_path: Path,
+) -> None:
+    python_path = tmp_path / "src" / "core.py"
+    python_path.parent.mkdir()
+    python_path.write_text("VALUE = True\n")
+    changed_files = (
+        ChangedFile(path=Path("src/core.py"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("lib/main.dart"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("lib/widget.dart"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("cmd/server.go"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("scripts/task.rb"), status=FileStatus.MODIFIED),
+        ChangedFile(path=Path("Makefile"), status=FileStatus.MODIFIED),
+        ChangedFile(
+            path=Path("assets/archive.bin"),
+            status=FileStatus.MODIFIED,
+            is_binary=True,
+        ),
+    )
+    repository = RepositoryContext(root=tmp_path, current_branch="feature/languages")
+
+    context = ChangeModelBuilder().build(
+        repository,
+        "main",
+        DiffCollection(
+            merge_base="abc123",
+            changed_files=changed_files,
+            uncertainty_notes=("The diff was truncated.",),
+        ),
+    )
+
+    assert context.uncertainty_notes == (
+        "Symbol-level analysis was unavailable for Dart (.dart), Go (.go), .rb, and "
+        "unrecognized; any symbols inferred from hunk context are heuristic.",
+        "The diff was truncated.",
     )
 
 
@@ -445,6 +509,7 @@ def test_uses_hunk_context_when_python_source_is_invalid(tmp_path: Path) -> None
     assert [(symbol.name, symbol.kind) for symbol in context.changed_symbols] == [
         ("broken", "function")
     ]
+    assert context.changed_symbols[0].origin is SymbolOrigin.HUNK_CONTEXT_FALLBACK
     assert any("Could not parse" in note for note in context.uncertainty_notes)
 
 
@@ -481,8 +546,9 @@ def test_bounds_source_reads_and_reports_unsupported_languages(tmp_path: Path) -
         '"src/large.py"' in note and "exceeds 32 bytes" in note
         for note in context.uncertainty_notes
     )
-    assert any(
-        '"src/service.go"' in note and "not available" in note for note in context.uncertainty_notes
+    assert context.uncertainty_notes[0] == (
+        "Symbol-level analysis was unavailable for Go (.go); any symbols inferred from hunk "
+        "context are heuristic."
     )
 
 

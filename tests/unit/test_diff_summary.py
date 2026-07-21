@@ -11,6 +11,7 @@ from coderecall.core.types import (
     FileStatus,
     LikelySideEffect,
     SideEffectKind,
+    SymbolOrigin,
 )
 
 
@@ -92,6 +93,115 @@ def test_builds_qualified_purpose_from_symbols_and_side_effects() -> None:
         "Likely updates `capture_payment` across 2 meaningful files, with a network call signal."
     )
     assert summary.side_effects == context.likely_side_effects
+
+
+def test_hunk_context_fallback_symbols_do_not_drive_purpose_inference() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/fallback",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=Path("src/broken.py"),
+                status=FileStatus.MODIFIED,
+                language="python",
+            ),
+        ),
+        changed_symbols=(
+            ChangedSymbol(
+                file_path=Path("src/broken.py"),
+                name="inferred_from_hunk",
+                kind="function",
+                origin=SymbolOrigin.HUNK_CONTEXT_FALLBACK,
+            ),
+        ),
+    )
+
+    summary = DiffSummaryService().summarize(context)
+
+    assert summary.purpose == "Likely updates code in 1 meaningful file."
+    assert summary.relevant_files == (Path("src/broken.py"),)
+
+
+def test_keeps_supported_language_purpose_when_unsupported_languages_are_mixed_in() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/mixed",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=Path("src/service.py"),
+                status=FileStatus.MODIFIED,
+                language="python",
+            ),
+            ChangedFile(
+                path=Path("lib/widget.dart"),
+                status=FileStatus.MODIFIED,
+                language="dart",
+            ),
+        ),
+        changed_symbols=(ChangedSymbol(Path("src/service.py"), "update_service", "function"),),
+    )
+
+    summary = DiffSummaryService().summarize(context)
+
+    assert summary.purpose == "Likely updates `update_service` across 2 meaningful files."
+
+
+def test_uses_status_aware_purpose_when_all_changed_languages_are_unsupported() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/flutter",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(
+                path=Path("lib/main.dart"),
+                status=FileStatus.ADDED,
+                language="dart",
+            ),
+            ChangedFile(
+                path=Path("lib/widget.dart"),
+                status=FileStatus.ADDED,
+                language="dart",
+            ),
+            ChangedFile(
+                path=Path("test/widget_test.dart"),
+                status=FileStatus.ADDED,
+                language="dart",
+                is_test=True,
+            ),
+        ),
+    )
+
+    summary = DiffSummaryService().summarize(context)
+
+    assert summary.purpose == (
+        "Likely adds 3 meaningful files across Dart (.dart); a symbol-level purpose could not "
+        "be inferred."
+    )
+
+
+def test_unsupported_language_purpose_excludes_binary_companion_files() -> None:
+    context = ChangeContext(
+        repo_root=Path("/repo"),
+        current_branch="feature/flutter-assets",
+        base_branch="main",
+        changed_files=(
+            ChangedFile(path=Path("lib/main.dart"), status=FileStatus.ADDED, language="dart"),
+            ChangedFile(
+                path=Path("assets/logo.bin"),
+                status=FileStatus.MODIFIED,
+                is_binary=True,
+            ),
+        ),
+    )
+
+    summary = DiffSummaryService().summarize(context)
+
+    assert summary.purpose == (
+        "Likely adds 1 meaningful file across Dart (.dart); a symbol-level purpose could not be "
+        "inferred."
+    )
 
 
 def test_sanitizes_summary_evidence_and_deduplicates_sections() -> None:

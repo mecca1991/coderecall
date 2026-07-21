@@ -19,6 +19,7 @@ from coderecall.core.types import (
     ModelMode,
     Question,
     QuestionCategory,
+    Report,
 )
 from coderecall.reporting import MarkdownReportWriter, ReportBuilder
 
@@ -90,6 +91,54 @@ def test_builder_generates_utc_metadata_and_orders_payload_by_question() -> None
     assert report.diff_summary == "Likely adds local reporting."
     assert tuple(answer.question_id for answer in report.answers) == ("behavior", "failure")
     assert tuple(item.question_id for item in report.assessments) == ("behavior", "failure")
+
+
+def test_builder_propagates_summary_uncertainty_to_report() -> None:
+    question = make_question()
+    summary_note = (
+        "Symbol-level analysis was unavailable for Dart (.dart); any symbols inferred from "
+        "hunk context are heuristic."
+    )
+
+    report = ReportBuilder(clock=lambda: NOW).build(
+        make_context(),
+        DiffSummary(purpose="Summary.", uncertainty_notes=(summary_note,)),
+        (question,),
+        (Answer(question_id="behavior", raw_text="Answer."),),
+        (make_assessment(),),
+    )
+
+    assert report.summary_uncertainty_notes == (summary_note,)
+    assert f"**Uncertainty**\n\n- {summary_note}" in MarkdownReportWriter().render(report)
+
+
+def test_render_without_summary_uncertainty_is_byte_for_byte_unchanged() -> None:
+    report = Report(
+        session_metadata={},
+        diff_summary="Summary.",
+        questions=(),
+        answers=(),
+        assessments=(),
+    )
+
+    assert MarkdownReportWriter().render(report) == (
+        "# CodeRecall Report\n"
+        "\n"
+        "Branch: \n"
+        "Base branch: \n"
+        "Model mode: \n"
+        "Generated: \n"
+        "\n"
+        "## Change Summary\n"
+        "\n"
+        "Summary.\n"
+        "\n"
+        "## Questions and Answers\n"
+        "\n"
+        "## Review Talking Points\n"
+        "\n"
+        "- No review talking points generated.\n"
+    )
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,12 @@ import stat
 from dataclasses import replace
 from pathlib import Path
 
+from coderecall.analysis.languages import (
+    SYMBOL_EXTRACTOR_LANGUAGES,
+    recognize_language,
+    unsupported_language_labels,
+    unsupported_language_note,
+)
 from coderecall.core.errors import CodeRecallError
 from coderecall.core.types import (
     ChangeContext,
@@ -18,20 +24,10 @@ from coderecall.core.types import (
     DiffCollection,
     DiffHunk,
     RepositoryContext,
+    SymbolOrigin,
 )
 from coderecall.git.git_adapter import GitAdapter
 
-_LANGUAGES_BY_SUFFIX = {
-    ".py": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".mts": "typescript",
-    ".cts": "typescript",
-}
 _TEST_DIRECTORIES = frozenset({"test", "tests", "__tests__"})
 _JS_FUNCTION = re.compile(
     r"^\s*(?:export\s+)?(?:default\s+)?(?:(async)\s+)?function\s+([A-Za-z_$][\w$]*)"
@@ -89,16 +85,17 @@ class ChangeModelBuilder:
         changed_symbols: list[ChangedSymbol] = []
         nearby_imports: list[CodeReference] = []
         call_sites: list[CodeReference] = []
-        uncertainty_notes = list(diff.uncertainty_notes)
-        unsupported_paths: list[Path] = []
+        unsupported_languages = unsupported_language_labels(changed_files)
+        uncertainty_notes = []
+        if unsupported_languages:
+            uncertainty_notes.append(unsupported_language_note(unsupported_languages))
+        uncertainty_notes.extend(diff.uncertainty_notes)
         heuristic_paths: list[Path] = []
 
         for changed_file in changed_files:
             if changed_file.is_binary:
                 continue
-            if changed_file.language not in {"python", "javascript", "typescript"}:
-                if changed_file.hunks:
-                    unsupported_paths.append(changed_file.path)
+            if changed_file.language not in SYMBOL_EXTRACTOR_LANGUAGES:
                 continue
             source, note = self._read_source(repository, diff, changed_file.path)
             if note is not None:
@@ -139,12 +136,6 @@ class ChangeModelBuilder:
                 "JavaScript/TypeScript symbol extraction is heuristic for: "
                 f"{self._format_path_summary(heuristic_paths)}."
             )
-        if unsupported_paths:
-            uncertainty_notes.append(
-                "Symbol extraction is not available for: "
-                f"{self._format_path_summary(unsupported_paths)}."
-            )
-
         return ChangeContext(
             repo_root=repository.root,
             current_branch=repository.current_branch,
@@ -430,6 +421,7 @@ class ChangeModelBuilder:
                         python_match.group(3),
                         kind,
                         hunk.new_start,
+                        SymbolOrigin.HUNK_CONTEXT_FALLBACK,
                     )
                 )
                 continue
@@ -442,6 +434,7 @@ class ChangeModelBuilder:
                         function_match.group(2),
                         kind,
                         hunk.new_start,
+                        SymbolOrigin.HUNK_CONTEXT_FALLBACK,
                     )
                 )
         return tuple(symbols)
@@ -524,9 +517,7 @@ class ChangeModelBuilder:
 
     @staticmethod
     def _classify_file(changed_file: ChangedFile) -> ChangedFile:
-        language = changed_file.language or _LANGUAGES_BY_SUFFIX.get(
-            changed_file.path.suffix.lower()
-        )
+        language = recognize_language(changed_file.path, changed_file.language)
         is_test = changed_file.is_test or ChangeModelBuilder._is_test_path(changed_file.path)
         return replace(changed_file, language=language, is_test=is_test)
 
